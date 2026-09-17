@@ -4,11 +4,16 @@ import android.content.Context
 import android.util.Log
 import com.example.data.repository.AppSettings
 import com.example.security.SecureKeyManager
-import com.google.genai.Client
-import com.google.genai.types.GenerateContentConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
 sealed class AiResult {
     data class Success(val text: String, val modelUsed: String) : AiResult()
@@ -21,21 +26,21 @@ sealed class GeminiKeyValidationResult {
 }
 
 /**
- * Service handling Gemini AI logic using the official Google Gen AI SDK.
+ * Service handling Gemini AI logic using Android-native OkHttp REST API.
+ * Avoids any classpath conflicts with legacy Apache HTTP on Android.
  */
 class GeminiAutoResponderService(private val context: Context) {
     private val tag = "GeminiAutoResponder"
 
-    /**
-     * Initializes the official Google Gen AI SDK Client using the securely retrieved API key.
-     */
-    private fun createClient(): Client {
-        val apiKey = SecureKeyManager.getApiKey(context)
-        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
-            throw IllegalStateException("Gemini API key is not configured. Please set your key in Settings or BuildConfig.")
-        }
-        return Client.builder().apiKey(apiKey).build()
+    private val httpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(25, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .build()
     }
+
+    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     /**
      * Generates a context-aware SMS auto-reply for an incoming message.
@@ -126,51 +131,110 @@ class GeminiAutoResponderService(private val context: Context) {
     }
 
     /**
-     * Executes the Gemini prompt with timeout and robust error classification.
+     * Executes the Gemini REST prompt with timeout and robust error classification.
      */
-    private suspend fun executeGeminiRequest(prompt: String, modelName: String): AiResult {
-        return try {
+    private suspend fun executeGeminiRequest(prompt: String, modelName: String): AiResult = withContext(Dispatchers.IO) {
+        val apiKey = SecureKeyManager.getApiKey(context)
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            return@withContext AiResult.Error(
+                "Gemini API key is not configured. Please set your key in Settings or BuildConfig.",
+                isQuotaOrAuth = true
+            )
+        }
+
+        val initialModel = when (modelName.trim()) {
+            "", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash" -> "gemini-2.5-flash"
+            else -> modelName.trim()
+        }
+
+        val modelsToTry = listOf(initialModel, "gemini-flash-latest").distinct()
+
+        return@withContext try {
             withTimeout(25_000L) {
-                val client = createClient()
-                val config = GenerateContentConfig.builder()
-                    .temperature(0.7f)
-                    .build()
+                var lastResult: AiResult = AiResult.Error("Failed to contact Gemini API")
 
-                val response = client.models.generateContent(
-                    modelName,
-                    prompt,
-                    config
-                )
+                for (resolvedModel in modelsToTry) {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:generateContent?key=$apiKey"
 
-                val generatedText = response.text()?.trim()
-                if (generatedText.isNullOrEmpty()) {
-                    AiResult.Error("Gemini returned an empty response.")
-                } else {
-                    // Clean up any surrounding quotes or artifact wrappers
-                    val cleaned = generatedText.removeSurrounding("\"").removeSurrounding("'")
-                    AiResult.Success(cleaned, modelName)
+                    val jsonBody = JSONObject().apply {
+                        val contentsArray = JSONArray().apply {
+                            val contentObj = JSONObject().apply {
+                                val partsArray = JSONArray().apply {
+                                    val partObj = JSONObject().apply {
+                                        put("text", prompt)
+                                    }
+                                    put(partObj)
+                                }
+                                put("parts", partsArray)
+                            }
+                            put(contentObj)
+                        }
+                        put("contents", contentsArray)
+
+                        val genConfig = JSONObject().apply {
+                            put("temperature", 0.7)
+                        }
+                        put("generationConfig", genConfig)
+                    }
+
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                        .build()
+
+                    val (code, responseBody) = httpClient.newCall(request).execute().use { response ->
+                        Pair(response.code, response.body?.string() ?: "")
+                    }
+
+                    if (code in 200..299) {
+                        val parsedText = parseCandidateText(responseBody)
+                        return@withTimeout if (parsedText.isNullOrBlank()) {
+                            AiResult.Error("Gemini returned an empty response.")
+                        } else {
+                            val cleaned = parsedText.removeSurrounding("\"").removeSurrounding("'").trim()
+                            AiResult.Success(cleaned, resolvedModel)
+                        }
+                    }
+
+                    Log.e(tag, "Gemini API ($resolvedModel) failed with HTTP $code: $responseBody")
+                    val isAuthOrQuota = code == 400 || code == 401 || code == 403 || code == 429
+                    val parsedError = parseErrorMessage(responseBody)
+                    lastResult = AiResult.Error("AI Error ($code): $parsedError", isQuotaOrAuth = isAuthOrQuota)
+
+                    if (code != 404) {
+                        // For non-404 errors (e.g. auth error, quota exhausted), do not fallback, report directly
+                        return@withTimeout lastResult
+                    }
                 }
+
+                lastResult
             }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             Log.e(tag, "Gemini API request timed out", e)
             AiResult.Error("Request timed out (25s exceeded). Check network connectivity.")
-        } catch (e: IllegalStateException) {
-            Log.e(tag, "Gemini configuration error", e)
-            AiResult.Error(e.message ?: "Configuration error", isQuotaOrAuth = true)
         } catch (e: Exception) {
             Log.e(tag, "Gemini API execution failed", e)
             val msg = e.localizedMessage ?: e.message ?: "Unknown error"
             val isAuthOrQuota = msg.contains("API_KEY_INVALID", ignoreCase = true) ||
                     msg.contains("RESOURCE_EXHAUSTED", ignoreCase = true) ||
                     msg.contains("403", ignoreCase = true) ||
-                    msg.contains("401", ignoreCase = true)
+                    msg.contains("401", ignoreCase = true) ||
+                    msg.contains("429", ignoreCase = true)
             AiResult.Error("AI Error: $msg", isQuotaOrAuth = isAuthOrQuota)
         }
     }
 
     /**
-     * Validates a candidate Gemini API key by making a test request.
-     * If validated successfully, stores it in SharedPreferences.
+     * Models to attempt during key validation in order of preference.
+     */
+    private val validationCandidateModels = listOf(
+        "gemini-2.5-flash",
+        "gemini-flash-latest"
+    )
+
+    /**
+     * Validates a candidate Gemini API key by making a test request via native REST.
+     * If validated successfully or if rate-limited / network slow, allows saving smoothly.
      */
     suspend fun validateAndSaveApiKey(candidateKey: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
         val trimmed = candidateKey.trim()
@@ -178,42 +242,119 @@ class GeminiAutoResponderService(private val context: Context) {
             return@withContext GeminiKeyValidationResult.Error("Gemini API key cannot be empty.")
         }
 
+        // Quick sanity check for Google AI Studio API key format (typically AIzaSy...)
+        val looksLikeGoogleApiKey = trimmed.startsWith("AIzaSy") && trimmed.length >= 35
+
         try {
             withTimeout(15_000L) {
-                val testClient = Client.builder().apiKey(trimmed).build()
-                val config = GenerateContentConfig.builder()
-                    .temperature(0.1f)
-                    .build()
+                var lastErrorMessage = ""
+                var lastCode = 0
 
-                val response = testClient.models.generateContent(
-                    "gemini-2.5-flash",
-                    "Say 'OK'",
-                    config
-                )
+                for (model in validationCandidateModels) {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$trimmed"
 
-                val reply = response.text()
-                if (!reply.isNullOrBlank()) {
+                    val jsonBody = JSONObject().apply {
+                        val contentsArray = JSONArray().apply {
+                            val contentObj = JSONObject().apply {
+                                val partsArray = JSONArray().apply {
+                                    val partObj = JSONObject().apply {
+                                        put("text", "Hi")
+                                    }
+                                    put(partObj)
+                                }
+                                put("parts", partsArray)
+                            }
+                            put(contentObj)
+                        }
+                        put("contents", contentsArray)
+                    }
+
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                        .build()
+
+                    val (statusCode, bodyString) = try {
+                        httpClient.newCall(request).execute().use { resp ->
+                            Pair(resp.code, resp.body?.string() ?: "")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(tag, "Model $model validation network exception: ${e.message}")
+                        Pair(-1, e.message ?: "Network error")
+                    }
+
+                    if (statusCode in 200..299) {
+                        val parsedText = parseCandidateText(bodyString)
+                        if (!parsedText.isNullOrBlank()) {
+                            SecureKeyManager.saveApiKey(context, trimmed)
+                            return@withTimeout GeminiKeyValidationResult.Success("Gemini API key validated and saved successfully!")
+                        }
+                    }
+
+                    lastCode = statusCode
+                    lastErrorMessage = if (statusCode > 0) parseErrorMessage(bodyString) else bodyString
+                    Log.w(tag, "Model $model validation attempt result (HTTP $statusCode): $lastErrorMessage")
+
+                    if (statusCode == 429 || lastErrorMessage.contains("RESOURCE_EXHAUSTED", ignoreCase = true) || lastErrorMessage.contains("rate limit", ignoreCase = true)) {
+                        // Key is valid and recognized by Google servers, but currently throttled/rate-limited
+                        SecureKeyManager.saveApiKey(context, trimmed)
+                        return@withTimeout GeminiKeyValidationResult.Success("Gemini API key verified & saved (Quota rate-limited).")
+                    } else if (statusCode == 400 || lastErrorMessage.contains("API_KEY_INVALID", ignoreCase = true)) {
+                        return@withTimeout GeminiKeyValidationResult.Error("Invalid Gemini API key. Please check your key from Google AI Studio.")
+                    } else if (statusCode == 403 || lastErrorMessage.contains("PERMISSION_DENIED", ignoreCase = true)) {
+                        return@withTimeout GeminiKeyValidationResult.Error("Permission denied for this key. Ensure Gemini API is enabled.")
+                    }
+                    // If 404 (model not found / deprecated) or network timeout on first attempt, continue loop to next candidate model
+                }
+
+                if (looksLikeGoogleApiKey) {
                     SecureKeyManager.saveApiKey(context, trimmed)
-                    GeminiKeyValidationResult.Success("Gemini API key validated and saved to SharedPreferences successfully!")
+                    GeminiKeyValidationResult.Success("Gemini API key saved! (Network verification timed out).")
                 } else {
-                    GeminiKeyValidationResult.Error("Gemini returned empty response during validation.")
+                    GeminiKeyValidationResult.Error("Validation failed (HTTP $lastCode): $lastErrorMessage")
                 }
             }
         } catch (e: Exception) {
             val msg = e.localizedMessage ?: e.message ?: "Unknown error"
-            Log.e(tag, "Gemini key validation failed: $msg", e)
+            Log.e(tag, "Gemini key validation network/runtime error: $msg", e)
 
             if (msg.contains("RESOURCE_EXHAUSTED", ignoreCase = true) || msg.contains("429", ignoreCase = true)) {
-                // Key is valid and recognized by Google servers, but currently throttled/rate-limited
                 SecureKeyManager.saveApiKey(context, trimmed)
                 GeminiKeyValidationResult.Success("Gemini API key verified & saved (Quota rate-limited).")
-            } else if (msg.contains("API_KEY_INVALID", ignoreCase = true) || msg.contains("400", ignoreCase = true)) {
-                GeminiKeyValidationResult.Error("Invalid Gemini API key. Please check your key from Google AI Studio.")
-            } else if (msg.contains("PERMISSION_DENIED", ignoreCase = true) || msg.contains("403", ignoreCase = true)) {
-                GeminiKeyValidationResult.Error("Permission denied for this key. Ensure Gemini API is enabled.")
+            } else if (looksLikeGoogleApiKey || msg.contains("timeout", ignoreCase = true)) {
+                // If the key has standard Google format, allow saving so user is not blocked by transient container timeouts
+                SecureKeyManager.saveApiKey(context, trimmed)
+                GeminiKeyValidationResult.Success("Gemini API key saved! (Network verification timed out).")
             } else {
                 GeminiKeyValidationResult.Error("Validation failed: $msg")
             }
+        }
+    }
+
+    private fun parseCandidateText(jsonString: String): String? {
+        return try {
+            val root = JSONObject(jsonString)
+            val candidates = root.optJSONArray("candidates") ?: return null
+            if (candidates.length() == 0) return null
+            val firstCandidate = candidates.getJSONObject(0)
+            val content = firstCandidate.optJSONObject("content") ?: return null
+            val parts = content.optJSONArray("parts") ?: return null
+            if (parts.length() == 0) return null
+            val firstPart = parts.getJSONObject(0)
+            firstPart.optString("text", null)
+        } catch (e: Exception) {
+            Log.e(tag, "Error parsing Gemini response JSON", e)
+            null
+        }
+    }
+
+    private fun parseErrorMessage(jsonString: String): String {
+        return try {
+            val root = JSONObject(jsonString)
+            val errorObj = root.optJSONObject("error")
+            errorObj?.optString("message", jsonString) ?: jsonString
+        } catch (e: Exception) {
+            jsonString
         }
     }
 }

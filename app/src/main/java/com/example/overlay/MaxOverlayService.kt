@@ -196,16 +196,11 @@ class MaxOverlayService : Service() {
     private fun startForegroundWithNotification() {
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            } else {
-                0
-            }
+            val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             try {
                 startForeground(NOTIFICATION_ID, notification, type)
             } catch (e: Exception) {
-                Log.w(TAG, "startForeground fallback without mic type", e)
-                startForeground(NOTIFICATION_ID, notification)
+                Log.e(TAG, "Failed to startForeground with FOREGROUND_SERVICE_TYPE_MICROPHONE", e)
             }
         } else {
             startForeground(NOTIFICATION_ID, notification)
