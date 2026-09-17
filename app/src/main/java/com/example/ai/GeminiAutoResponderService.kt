@@ -15,6 +15,11 @@ sealed class AiResult {
     data class Error(val message: String, val isQuotaOrAuth: Boolean = false) : AiResult()
 }
 
+sealed class GeminiKeyValidationResult {
+    data class Success(val message: String) : GeminiKeyValidationResult()
+    data class Error(val message: String) : GeminiKeyValidationResult()
+}
+
 /**
  * Service handling Gemini AI logic using the official Google Gen AI SDK.
  */
@@ -160,6 +165,55 @@ class GeminiAutoResponderService(private val context: Context) {
                     msg.contains("403", ignoreCase = true) ||
                     msg.contains("401", ignoreCase = true)
             AiResult.Error("AI Error: $msg", isQuotaOrAuth = isAuthOrQuota)
+        }
+    }
+
+    /**
+     * Validates a candidate Gemini API key by making a test request.
+     * If validated successfully, stores it in SharedPreferences.
+     */
+    suspend fun validateAndSaveApiKey(candidateKey: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
+        val trimmed = candidateKey.trim()
+        if (trimmed.isBlank()) {
+            return@withContext GeminiKeyValidationResult.Error("Gemini API key cannot be empty.")
+        }
+
+        try {
+            withTimeout(15_000L) {
+                val testClient = Client.builder().apiKey(trimmed).build()
+                val config = GenerateContentConfig.builder()
+                    .temperature(0.1f)
+                    .build()
+
+                val response = testClient.models.generateContent(
+                    "gemini-2.5-flash",
+                    "Say 'OK'",
+                    config
+                )
+
+                val reply = response.text()
+                if (!reply.isNullOrBlank()) {
+                    SecureKeyManager.saveApiKey(context, trimmed)
+                    GeminiKeyValidationResult.Success("Gemini API key validated and saved to SharedPreferences successfully!")
+                } else {
+                    GeminiKeyValidationResult.Error("Gemini returned empty response during validation.")
+                }
+            }
+        } catch (e: Exception) {
+            val msg = e.localizedMessage ?: e.message ?: "Unknown error"
+            Log.e(tag, "Gemini key validation failed: $msg", e)
+
+            if (msg.contains("RESOURCE_EXHAUSTED", ignoreCase = true) || msg.contains("429", ignoreCase = true)) {
+                // Key is valid and recognized by Google servers, but currently throttled/rate-limited
+                SecureKeyManager.saveApiKey(context, trimmed)
+                GeminiKeyValidationResult.Success("Gemini API key verified & saved (Quota rate-limited).")
+            } else if (msg.contains("API_KEY_INVALID", ignoreCase = true) || msg.contains("400", ignoreCase = true)) {
+                GeminiKeyValidationResult.Error("Invalid Gemini API key. Please check your key from Google AI Studio.")
+            } else if (msg.contains("PERMISSION_DENIED", ignoreCase = true) || msg.contains("403", ignoreCase = true)) {
+                GeminiKeyValidationResult.Error("Permission denied for this key. Ensure Gemini API is enabled.")
+            } else {
+                GeminiKeyValidationResult.Error("Validation failed: $msg")
+            }
         }
     }
 }

@@ -27,6 +27,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- SMS (Retained for auto-responder capabilities) -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
@@ -94,6 +95,12 @@
                 android:name="android.accessibilityservice.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- MAX Assistant Siri-Style Floating System Overlay Service -->
+        <service
+            android:name=".overlay.MaxOverlayService"
+            android:enabled="true"
+            android:exported="false" />
 
         <!-- SMS Broadcast Receiver -->
         <receiver

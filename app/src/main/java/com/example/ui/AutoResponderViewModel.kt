@@ -1,6 +1,10 @@
 package com.example.ui
 
+import android.Manifest
 import android.app.Application
+import android.content.Context
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.AutoResponderApp
@@ -23,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -81,6 +86,12 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     private val _apiKeyText = MutableStateFlow(SecureKeyManager.getApiKey(application))
     val apiKeyText: StateFlow<String> = _apiKeyText.asStateFlow()
 
+    private val _isValidatingGeminiKey = MutableStateFlow(false)
+    val isValidatingGeminiKey: StateFlow<Boolean> = _isValidatingGeminiKey.asStateFlow()
+
+    private val _geminiValidationStatus = MutableStateFlow<String?>(null)
+    val geminiValidationStatus: StateFlow<String?> = _geminiValidationStatus.asStateFlow()
+
     private val _elevenLabsApiKeyText = MutableStateFlow(app.elevenLabsKeyManager.getApiKey())
     val elevenLabsApiKeyText: StateFlow<String> = _elevenLabsApiKeyText.asStateFlow()
 
@@ -89,6 +100,22 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
 
     private val _elevenLabsValidationStatus = MutableStateFlow<String?>(null)
     val elevenLabsValidationStatus: StateFlow<String?> = _elevenLabsValidationStatus.asStateFlow()
+
+    // MAX Voice Orb Reactive State Flows
+    private val _isVoiceOrbActive = MutableStateFlow(false)
+    val isVoiceOrbActive: StateFlow<Boolean> = _isVoiceOrbActive.asStateFlow()
+
+    private val _isVoiceOrbListening = MutableStateFlow(false)
+    val isVoiceOrbListening: StateFlow<Boolean> = _isVoiceOrbListening.asStateFlow()
+
+    private val _isVoiceOrbSpeaking = MutableStateFlow(false)
+    val isVoiceOrbSpeaking: StateFlow<Boolean> = _isVoiceOrbSpeaking.asStateFlow()
+
+    private val _voiceOrbStatus = MutableStateFlow("Tap MAX Voice Orb to speak")
+    val voiceOrbStatus: StateFlow<String> = _voiceOrbStatus.asStateFlow()
+
+    private val _voiceOrbRmsDb = MutableStateFlow(0f)
+    val voiceOrbRmsDb: StateFlow<Float> = _voiceOrbRmsDb.asStateFlow()
 
     val elevenLabsKeyManager = app.elevenLabsKeyManager
     val elevenLabsService = app.elevenLabsTtsService
@@ -104,6 +131,19 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
 
     private val _sttPipelineStatus = MutableStateFlow<String?>(null)
     val sttPipelineStatus: StateFlow<String?> = _sttPipelineStatus.asStateFlow()
+
+    // Text & Search Query State
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _isGeminiProcessing = MutableStateFlow(false)
+    val isGeminiProcessing: StateFlow<Boolean> = _isGeminiProcessing.asStateFlow()
+
+    private val _latestAssistantResponse = MutableStateFlow<String?>(null)
+    val latestAssistantResponse: StateFlow<String?> = _latestAssistantResponse.asStateFlow()
+
+    // System Overlay Service State
+    val isOverlayActive: StateFlow<Boolean> = com.example.overlay.MaxOverlayService.isOverlayActive
 
     // WhatsApp Control Manager
     val whatsAppManager = WhatsAppControlManager.instance
@@ -145,7 +185,13 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val liveVoiceState: StateFlow<String> = MaxAssistantForegroundService.liveVoiceState
     val voiceDetectorState: StateFlow<VoiceDetectorState> = voiceDetector.detectorState
     val rmsDbLevel: StateFlow<Float> = voiceDetector.rmsDbLevel
-    val isTtsSpeaking: StateFlow<Boolean> = announcer.isSpeaking
+    val isTtsSpeaking: StateFlow<Boolean> = combine(
+        announcer.isSpeaking,
+        elevenLabsService.isPlayingAudio,
+        _isVoiceOrbSpeaking
+    ) { speakingTts, playingElevenLabs, speakingOrb ->
+        speakingTts || playingElevenLabs || speakingOrb
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
         // Setup in-app voice detector listeners for test workbench
@@ -155,12 +201,34 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             }
         }
 
-        // Setup native STT manager callback pipeline: User Speech -> Gemini AI -> ElevenLabs TTS
+        // Setup native STT manager callback pipeline: User Speech -> Gemini AI -> ElevenLabs/System TTS
         maxSttManager.onSpeechRecognizedListener = { spokenText ->
+            _isVoiceOrbListening.value = false
+            _voiceOrbStatus.value = "Recognized: \"$spokenText\" • Asking Gemini AI..."
             processSttUserQuery(spokenText)
         }
         maxSttManager.onErrorListener = { errorMsg ->
+            _isVoiceOrbListening.value = false
+            _voiceOrbStatus.value = "Speech recognition: $errorMsg. Tap Orb to retry."
             _sttPipelineStatus.value = "STT Error: $errorMsg"
+        }
+
+        // Forward rmsDbLevel for voice orb dynamic pulsating
+        viewModelScope.launch {
+            maxSttManager.rmsDbLevel.collect { db ->
+                if (_isVoiceOrbListening.value) {
+                    _voiceOrbRmsDb.value = db
+                }
+            }
+        }
+
+        // Forward partial live transcription to orb status
+        viewModelScope.launch {
+            maxSttManager.partialText.collect { partial ->
+                if (partial.isNotBlank() && _isVoiceOrbListening.value) {
+                    _voiceOrbStatus.value = "Hearing: \"$partial\"..."
+                }
+            }
         }
     }
 
@@ -300,6 +368,39 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     fun saveApiKey(newKey: String) {
         SecureKeyManager.saveApiKey(getApplication(), newKey)
         _apiKeyText.value = SecureKeyManager.getApiKey(getApplication())
+        _geminiValidationStatus.value = "Gemini key saved to SharedPreferences."
+    }
+
+    /**
+     * Validates candidate Gemini API key with Google servers and saves to SharedPreferences upon success.
+     */
+    fun validateAndSaveGeminiApiKey(candidateKey: String, onResult: ((Boolean, String) -> Unit)? = null) {
+        val trimmed = candidateKey.trim()
+        if (trimmed.isBlank()) {
+            _geminiValidationStatus.value = "Please enter a valid Gemini API key."
+            onResult?.invoke(false, "Please enter a valid Gemini API key.")
+            return
+        }
+
+        viewModelScope.launch {
+            _isValidatingGeminiKey.value = true
+            _geminiValidationStatus.value = "Validating Gemini API key with Google servers..."
+
+            val result = geminiService.validateAndSaveApiKey(trimmed)
+            _isValidatingGeminiKey.value = false
+
+            when (result) {
+                is com.example.ai.GeminiKeyValidationResult.Success -> {
+                    _apiKeyText.value = SecureKeyManager.getApiKey(getApplication())
+                    _geminiValidationStatus.value = result.message
+                    onResult?.invoke(true, result.message)
+                }
+                is com.example.ai.GeminiKeyValidationResult.Error -> {
+                    _geminiValidationStatus.value = result.message
+                    onResult?.invoke(false, result.message)
+                }
+            }
+        }
     }
 
     fun validateAndSaveElevenLabsApiKey(candidateKey: String, onResult: ((Boolean, String) -> Unit)? = null) {
@@ -332,7 +433,58 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
 
     fun clearApiKey() {
         SecureKeyManager.clearCustomApiKey(getApplication())
-        _apiKeyText.value = SecureKeyManager.getApiKey(getApplication())
+        _apiKeyText.value = ""
+        _geminiValidationStatus.value = "Gemini key cleared."
+    }
+
+    /**
+     * Toggles the MAX Voice Orb:
+     * When toggled ON, listens for user voice with Vosk offline model, sends text to Gemini AI,
+     * and speaks back responses via ElevenLabs or System TTS.
+     * When toggled OFF or tapped while active, cancels speech/listening.
+     */
+    fun toggleVoiceOrb() {
+        if (_isVoiceOrbSpeaking.value || announcer.isSpeaking.value || elevenLabsService.isPlayingAudio.value) {
+            stopTtsVoice()
+            elevenLabsService.stopAudio()
+            _isVoiceOrbSpeaking.value = false
+            _isVoiceOrbListening.value = false
+            _isVoiceOrbActive.value = false
+            _voiceOrbStatus.value = "Speech stopped. Tap MAX Orb to speak."
+        } else if (_isVoiceOrbListening.value) {
+            stopSttAssistantListening()
+            _isVoiceOrbListening.value = false
+            _isVoiceOrbActive.value = false
+            _voiceOrbStatus.value = "Listening cancelled. Tap MAX Orb to speak."
+        } else {
+            startVoiceOrbListening()
+        }
+    }
+
+    fun startVoiceOrbListening() {
+        if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            _isVoiceOrbListening.value = false
+            _isVoiceOrbActive.value = false
+            _voiceOrbStatus.value = "Microphone access needed. Tap to grant permission."
+            _sttPipelineStatus.value = "RECORD_AUDIO permission missing. Please grant microphone access."
+            return
+        }
+        _isVoiceOrbActive.value = true
+        _isVoiceOrbListening.value = true
+        _isVoiceOrbSpeaking.value = false
+        _voiceOrbStatus.value = "Listening with Vosk offline model & Gemini AI..."
+        audioManagerHelper.playListeningPromptBeep()
+        maxSttManager.startListening(preferredLanguage = "hi-IN")
+    }
+
+    fun stopVoiceOrb() {
+        _isVoiceOrbListening.value = false
+        _isVoiceOrbSpeaking.value = false
+        _isVoiceOrbActive.value = false
+        maxSttManager.stopListening()
+        elevenLabsService.stopAudio()
+        announcer.stop()
+        _voiceOrbStatus.value = "Tap MAX Voice Orb to speak"
     }
 
     fun testElevenLabsVoice(
@@ -378,6 +530,10 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
      * Starts native STT recognition for Hindi and English speech input.
      */
     fun startSttAssistantListening(preferredLang: String = "hi-IN") {
+        if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            _sttPipelineStatus.value = "RECORD_AUDIO permission missing. Please grant microphone access."
+            return
+        }
         audioManagerHelper.playListeningPromptBeep()
         _sttPipelineStatus.value = "Listening for Hindi / English speech..."
         maxSttManager.startListening(preferredLanguage = preferredLang)
@@ -391,17 +547,52 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         _sttPipelineStatus.value = "STT Stopped."
     }
 
+    fun onSearchQueryChanged(newQuery: String) {
+        _searchQuery.value = newQuery
+    }
+
+    fun clearAssistantResponse() {
+        _latestAssistantResponse.value = null
+    }
+
+    fun toggleSystemOverlay(context: Context) {
+        if (!PermissionHelper.canDrawOverlays(context)) {
+            PermissionHelper.openOverlaySettings(context)
+        } else {
+            if (isOverlayActive.value) {
+                com.example.overlay.MaxOverlayService.hideOverlay(context)
+            } else {
+                com.example.overlay.MaxOverlayService.showOverlay(context)
+            }
+        }
+    }
+
     /**
-     * Processes recognized user speech: First checks hardware toggles -> fallback to Gemini AI -> ElevenLabs TTS playback.
+     * Sends typed text query directly to Gemini AI assistant, displays response,
+     * and speaks response back via TTS while animating wave visualizer.
+     */
+    fun sendTextMessage(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return
+        _searchQuery.value = ""
+        processSttUserQuery(trimmed)
+    }
+
+    /**
+     * Processes recognized user speech or typed text query:
+     * First checks hardware toggles -> fallback to Gemini AI -> TTS playback.
      */
     fun processSttUserQuery(spokenText: String) {
         if (spokenText.isBlank()) return
 
         viewModelScope.launch {
+            _isGeminiProcessing.value = true
             // 1. Check for Emergency SOS & Live Location voice commands
             val sosRes = emergencySosManager.processVoiceSosCommand(spokenText)
             if (sosRes.isHandled) {
                 val feedback = sosRes.feedbackMessage
+                _isGeminiProcessing.value = false
+                _latestAssistantResponse.value = feedback
                 _sttPipelineStatus.value = "Emergency SOS Action: $feedback"
 
                 val currentList = _sttConversationLog.value.toMutableList()
@@ -420,6 +611,8 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             val cameraRes = maxCameraManager.processVoiceCameraCommand(spokenText)
             if (cameraRes.isHandled) {
                 val feedback = cameraRes.feedbackMessage
+                _isGeminiProcessing.value = false
+                _latestAssistantResponse.value = feedback
                 _sttPipelineStatus.value = "Camera Action: $feedback"
 
                 val currentList = _sttConversationLog.value.toMutableList()
@@ -438,6 +631,8 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             val accessRes = com.example.accessibility.MaxAccessibilityService.processVoiceAccessibilityCommand(spokenText)
             if (accessRes.isHandled) {
                 val feedback = accessRes.feedbackMessage
+                _isGeminiProcessing.value = false
+                _latestAssistantResponse.value = feedback
                 _sttPipelineStatus.value = "Accessibility Action: $feedback"
 
                 val currentList = _sttConversationLog.value.toMutableList()
@@ -456,6 +651,8 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             val voiceToggleRes = deviceToggleManager.processVoiceToggleCommand(spokenText)
             if (voiceToggleRes.isHandled) {
                 val feedback = voiceToggleRes.feedbackMessage
+                _isGeminiProcessing.value = false
+                _latestAssistantResponse.value = feedback
                 _sttPipelineStatus.value = "Hardware Action: $feedback"
 
                 val currentList = _sttConversationLog.value.toMutableList()
@@ -470,7 +667,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 return@launch
             }
 
-            _sttPipelineStatus.value = "User spoke: \"$spokenText\" -> Asking Gemini AI..."
+            _sttPipelineStatus.value = "User: \"$spokenText\" -> Asking Gemini AI..."
             
             // Generate response from Gemini AI
             val aiResult = geminiService.generateMaxVoiceResponse(
@@ -478,10 +675,14 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 settings = settings.value
             )
 
+            _isGeminiProcessing.value = false
             when (aiResult) {
                 is com.example.ai.AiResult.Success -> {
                     val aiReplyText = aiResult.text
+                    _latestAssistantResponse.value = aiReplyText
                     _sttPipelineStatus.value = "Gemini AI: \"$aiReplyText\" -> Generating ElevenLabs TTS..."
+                    _voiceOrbStatus.value = "Gemini AI: \"$aiReplyText\""
+                    _isVoiceOrbSpeaking.value = true
                     
                     // Add to conversation log
                     val currentList = _sttConversationLog.value.toMutableList()
@@ -498,6 +699,9 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                             is com.example.voice.ElevenLabsResult.Success -> {
                                 _sttPipelineStatus.value = "Playing ElevenLabs natural voice response..."
                                 elevenLabsService.playAudio(ttsResult.audioFile) {
+                                    _isVoiceOrbSpeaking.value = false
+                                    _isVoiceOrbActive.value = false
+                                    _voiceOrbStatus.value = "Tap mic to speak with MAX"
                                     _sttPipelineStatus.value = "Voice interaction complete."
                                 }
                             }
@@ -514,13 +718,21 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 is com.example.ai.AiResult.Error -> {
                     val errorMsg = "Gemini AI Error: ${aiResult.message}"
                     _sttPipelineStatus.value = errorMsg
-                    fallbackAndroidTts("Sorry, I could not generate a response right now. Please try again.")
+                    val fallbackMsg = if (!SecureKeyManager.hasValidApiKey(getApplication())) {
+                        "Gemini API key is not configured. Please save your API key in Settings."
+                    } else {
+                        "Sorry, I could not complete the request right now. Check your internet connection."
+                    }
+                    _latestAssistantResponse.value = fallbackMsg
+                    _voiceOrbStatus.value = fallbackMsg
+                    fallbackAndroidTts(fallbackMsg)
                 }
             }
         }
     }
 
-    private fun fallbackAndroidTts(text: String) {
+    private fun fallbackAndroidTts(text: String, onDone: (() -> Unit)? = null) {
+        _isVoiceOrbSpeaking.value = true
         audioManagerHelper.requestVoiceAssistantAudioFocus()
         announcer.announceCaller(
             callerNameOrNumber = text,
@@ -530,6 +742,10 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             repeatCount = 1,
             onDone = {
                 audioManagerHelper.releaseVoiceAssistantAudioFocus()
+                _isVoiceOrbSpeaking.value = false
+                _isVoiceOrbActive.value = false
+                _voiceOrbStatus.value = "Tap MAX Voice Orb to speak"
+                onDone?.invoke()
             }
         )
     }
@@ -576,6 +792,10 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun startDictatingWhatsAppReply(messageId: String, preferredLang: String = "hi-IN") {
+        if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            _sttPipelineStatus.value = "RECORD_AUDIO permission missing. Please grant microphone access."
+            return
+        }
         val targetMsg = whatsAppMessages.value.find { it.id == messageId } ?: return
         audioManagerHelper.playListeningPromptBeep()
         _sttPipelineStatus.value = "Dictating WhatsApp reply to ${targetMsg.sender}..."

@@ -6,6 +6,9 @@ import android.media.MediaPlayer
 import android.util.Log
 import com.example.security.SecureKeyManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -34,6 +37,9 @@ class ElevenLabsTtsService(private val context: Context) {
         .build()
 
     private var mediaPlayer: MediaPlayer? = null
+
+    private val _isPlayingAudio = MutableStateFlow(false)
+    val isPlayingAudio: StateFlow<Boolean> = _isPlayingAudio.asStateFlow()
 
     suspend fun generateSpeech(
         text: String,
@@ -99,6 +105,7 @@ class ElevenLabsTtsService(private val context: Context) {
     suspend fun playAudio(audioFile: File, onCompletion: (() -> Unit)? = null) = withContext(Dispatchers.Main) {
         try {
             stopAudio()
+            _isPlayingAudio.value = true
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
@@ -108,13 +115,21 @@ class ElevenLabsTtsService(private val context: Context) {
                 )
                 setDataSource(audioFile.absolutePath)
                 setOnCompletionListener {
+                    _isPlayingAudio.value = false
                     onCompletion?.invoke()
                     stopAudio()
+                }
+                setOnErrorListener { _, what, extra ->
+                    Log.e(tag, "MediaPlayer error: what=$what, extra=$extra")
+                    _isPlayingAudio.value = false
+                    stopAudio()
+                    true
                 }
                 prepare()
                 start()
             }
         } catch (e: Exception) {
+            _isPlayingAudio.value = false
             Log.e(tag, "Error playing audio file: ${e.message}", e)
             onCompletion?.invoke()
         }
@@ -122,6 +137,7 @@ class ElevenLabsTtsService(private val context: Context) {
 
     fun stopAudio() {
         try {
+            _isPlayingAudio.value = false
             mediaPlayer?.stop()
             mediaPlayer?.release()
             mediaPlayer = null

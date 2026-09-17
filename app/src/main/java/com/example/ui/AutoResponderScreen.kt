@@ -4,6 +4,7 @@ import com.example.voice.MaxSttState
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import java.util.Locale
@@ -29,6 +30,12 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,6 +56,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -74,7 +82,9 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.BrightnessHigh
@@ -84,6 +94,7 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -130,8 +141,10 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -160,7 +173,9 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -264,6 +279,17 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
     val rejectedCallsCount by viewModel.rejectedCallsCount.collectAsState()
     val simCallState by viewModel.incomingCallSimState.collectAsState()
 
+    val isVoiceOrbActive by viewModel.isVoiceOrbActive.collectAsState()
+    val isVoiceOrbListening by viewModel.isVoiceOrbListening.collectAsState()
+    val isVoiceOrbSpeaking by viewModel.isVoiceOrbSpeaking.collectAsState()
+    val voiceOrbStatus by viewModel.voiceOrbStatus.collectAsState()
+    val voiceOrbRmsDb by viewModel.voiceOrbRmsDb.collectAsState()
+
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val isGeminiProcessing by viewModel.isGeminiProcessing.collectAsState()
+    val latestAssistantResponse by viewModel.latestAssistantResponse.collectAsState()
+    val isOverlayActive by viewModel.isOverlayActive.collectAsState()
+
     val currentTheme = remember(settings.themePreset) {
         SiriThemePresets.getTheme(settings.themePreset)
     }
@@ -271,11 +297,39 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var showApiKeyDialog by remember { mutableStateOf(false) }
 
-    // Permission launcher
+    // Permission launcher for all required permissions
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
         viewModel.refreshPermissions()
+    }
+
+    // Permission launcher specifically for RECORD_AUDIO (Voice Assistant / Orb)
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        viewModel.refreshPermissions()
+        if (isGranted) {
+            viewModel.startVoiceOrbListening()
+        } else {
+            scope.launch {
+                val res = snackbarHostState.showSnackbar(
+                    message = "Microphone access is required to speak with MAX Assistant.",
+                    actionLabel = "Settings",
+                    duration = SnackbarDuration.Long
+                )
+                if (res == SnackbarResult.ActionPerformed) {
+                    PermissionHelper.openAppSettings(context)
+                }
+            }
+        }
+    }
+
+    // Auto-prompt required permissions on initial launch if microphone access is missing
+    LaunchedEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
+        }
     }
 
     Scaffold(
@@ -304,6 +358,8 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
                     isServiceRunning = isServiceRunning,
                     liveVoiceState = liveVoiceState,
                     theme = currentTheme,
+                    isOverlayActive = isOverlayActive,
+                    onToggleOverlay = { viewModel.toggleSystemOverlay(context) },
                     onToggleMaxAssistant = { viewModel.toggleMaxAssistant(it) },
                     onOpenApiKeyDialog = { showApiKeyDialog = true }
                 )
@@ -351,37 +407,41 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
                         8 -> WorkbenchAndEventsTab(viewModel, settings, events, callHistoryLogs, acceptedCallsCount, rejectedCallsCount, simCallState, currentTheme)
                     }
                 }
-
-                // Bottom Padding for Voice Orb
-                Spacer(modifier = Modifier.height(100.dp))
             }
 
-            // Floating Animated Siri Glowing Orb at Bottom Center
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 12.dp)
-            ) {
-                SiriVoiceOrb(
-                    isListening = voiceDetectorState is VoiceDetectorState.Listening || simCallState.phase == "LISTENING",
-                    isSpeaking = isTtsSpeaking || simCallState.phase == "ANNOUNCING",
-                    rmsDbLevel = rmsDbLevel,
-                    theme = currentTheme,
-                    onClick = {
-                        if (voiceDetectorState is VoiceDetectorState.Listening) {
-                            viewModel.stopLiveVoiceRecognitionTest()
-                        } else if (isTtsSpeaking) {
-                            viewModel.stopTtsVoice()
+            // Bottom Assistant Interaction Dock: Live Gemini Response + Search/Text Input Box + Dedicated Mic + Siri Glowing Wave
+            AssistantBottomInteractionDock(
+                searchQuery = searchQuery,
+                onQueryChanged = { viewModel.onSearchQueryChanged(it) },
+                onSendQuery = { viewModel.sendTextMessage(it) },
+                isListening = isVoiceOrbListening || voiceDetectorState is VoiceDetectorState.Listening || simCallState.phase == "LISTENING",
+                isProcessing = isGeminiProcessing,
+                isSpeaking = isVoiceOrbSpeaking || isTtsSpeaking || simCallState.phase == "ANNOUNCING",
+                rmsDbLevel = if (isVoiceOrbListening) voiceOrbRmsDb else rmsDbLevel,
+                statusText = voiceOrbStatus,
+                latestResponse = latestAssistantResponse,
+                onDismissResponse = { viewModel.clearAssistantResponse() },
+                isOverlayActive = isOverlayActive,
+                onToggleOverlay = { viewModel.toggleSystemOverlay(context) },
+                onMicClick = {
+                    if (isVoiceOrbListening || isVoiceOrbSpeaking) {
+                        viewModel.toggleVoiceOrb()
+                    } else {
+                        val hasAudioPerm = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        if (hasAudioPerm) {
+                            viewModel.startVoiceOrbListening()
                         } else {
-                            viewModel.testTtsVoice("MAX Assistant Active")
-                            scope.launch {
-                                snackbarHostState.showSnackbar("MAX Voice Orb Activated")
-                            }
+                            recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     }
-                )
-            }
+                },
+                theme = currentTheme,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
 
@@ -401,6 +461,8 @@ fun SiriHeaderBar(
     isServiceRunning: Boolean,
     liveVoiceState: String,
     theme: SiriThemeColors,
+    isOverlayActive: Boolean,
+    onToggleOverlay: () -> Unit,
     onToggleMaxAssistant: (Boolean) -> Unit,
     onOpenApiKeyDialog: () -> Unit
 ) {
@@ -418,44 +480,79 @@ fun SiriHeaderBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "MAX ASSISTANT",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = theme.primaryAccent,
-                        letterSpacing = 1.5.sp
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Unique Siri-style MAX glowing logo emblem
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .border(1.5.dp, theme.primaryAccent, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.max_siri_logo),
+                        contentDescription = "MAX Siri Logo",
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isServiceRunning) theme.primaryAccent.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.1f))
-                            .border(1.dp, if (isServiceRunning) theme.primaryAccent else Color.Gray, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            text = if (isServiceRunning) "ACTIVE" else "STANDBY",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isServiceRunning) theme.primaryAccent else Color.LightGray
-                        )
-                    }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-                Text(
-                    text = if (isServiceRunning) liveVoiceState else "Voice Control Disabled",
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.7f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "MAX ASSISTANT",
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = theme.primaryAccent,
+                            letterSpacing = 1.2.sp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isServiceRunning) theme.primaryAccent.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.1f))
+                                .border(1.dp, if (isServiceRunning) theme.primaryAccent else Color.Gray, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = if (isServiceRunning) "ACTIVE" else "STANDBY",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isServiceRunning) theme.primaryAccent else Color.LightGray
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(3.dp))
+
+                    Text(
+                        text = if (isServiceRunning) liveVoiceState else "Voice Control Disabled",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // System Overlay floating toggle button
+                IconButton(
+                    onClick = onToggleOverlay,
+                    modifier = Modifier.testTag("system_overlay_header_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Layers,
+                        contentDescription = "System Overlay",
+                        tint = if (isOverlayActive) theme.primaryAccent else Color.White.copy(alpha = 0.45f)
+                    )
+                }
+
                 IconButton(
                     onClick = onOpenApiKeyDialog,
                     modifier = Modifier.testTag("api_key_settings_btn")
@@ -494,8 +591,9 @@ fun SiriThemeSelectorRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         presets.forEach { preset ->
@@ -504,21 +602,21 @@ fun SiriThemeSelectorRow(
                 modifier = Modifier
                     .clip(CircleShape)
                     .background(
-                        if (isSelected) theme.primaryAccent.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.05f)
+                        if (isSelected) theme.primaryAccent.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f)
                     )
                     .border(
                         width = if (isSelected) 1.5.dp else 0.5.dp,
-                        color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.2f),
+                        color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.25f),
                         shape = CircleShape
                     )
                     .clickable { onSelectPreset(preset) }
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = preset,
                     fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                    color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.7f)
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.75f)
                 )
             }
         }
@@ -635,7 +733,8 @@ fun VoiceCallAnnouncerTab(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -869,7 +968,8 @@ fun BlocklistSpamTab(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -1003,7 +1103,8 @@ fun HardwareSystemControlTab(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -1392,7 +1493,8 @@ fun AppMediaControlTab(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -1451,7 +1553,8 @@ fun WorkbenchAndEventsTab(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -1970,6 +2073,373 @@ fun SiriEventLogItem(
     }
 }
 
+/**
+ * Prominent Search/Text Input Box, Dedicated Microphone Trigger,
+ * Siri-Style Glowing Wave Animation Visualizer, and Live Gemini AI Response Dock.
+ */
+@Composable
+fun AssistantBottomInteractionDock(
+    searchQuery: String,
+    onQueryChanged: (String) -> Unit,
+    onSendQuery: (String) -> Unit,
+    isListening: Boolean,
+    isProcessing: Boolean,
+    isSpeaking: Boolean,
+    rmsDbLevel: Float,
+    statusText: String,
+    latestResponse: String?,
+    onDismissResponse: () -> Unit,
+    isOverlayActive: Boolean,
+    onToggleOverlay: () -> Unit,
+    onMicClick: () -> Unit,
+    theme: SiriThemeColors,
+    modifier: Modifier = Modifier
+) {
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copiedFeedback by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        Color(0xE6060B14),
+                        Color(0xF8060B14)
+                    )
+                )
+            )
+            .navigationBarsPadding(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // 1. Live Gemini AI Response Card
+        AnimatedVisibility(
+            visible = !latestResponse.isNullOrBlank() || isProcessing,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xF20F172A),
+                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.4f)),
+                shadowElevation = 8.dp
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isProcessing) theme.secondaryAccent else Color(0xFF10B981))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isProcessing) "MAX • Thinking with Gemini AI..." else "MAX • Gemini Response",
+                                color = theme.primaryAccent,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!latestResponse.isNullOrBlank()) {
+                                IconButton(
+                                    onClick = {
+                                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(latestResponse))
+                                        copiedFeedback = true
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy Response",
+                                        tint = if (copiedFeedback) Color(0xFF10B981) else Color.White.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = onDismissResponse,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    if (isProcessing) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = theme.primaryAccent,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Routing query to Gemini API & synthesizing response...",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 12.sp
+                            )
+                        }
+                    } else if (!latestResponse.isNullOrBlank()) {
+                        Text(
+                            text = latestResponse,
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            maxLines = 6,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+
+        // 2. Status Pill & Floating System Overlay Quick Toggle Chip
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xD90F172A))
+                    .border(0.5.dp, theme.primaryAccent.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isListening) Color(0xFFEF4444)
+                            else if (isSpeaking) Color(0xFF10B981)
+                            else theme.primaryAccent
+                        )
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = statusText.ifBlank { "Tap mic to speak or type to ask Gemini" },
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (isOverlayActive) theme.primaryAccent.copy(alpha = 0.25f) else Color(0xD90F172A),
+                border = BorderStroke(
+                    1.dp,
+                    if (isOverlayActive) theme.primaryAccent else theme.primaryAccent.copy(alpha = 0.3f)
+                ),
+                modifier = Modifier
+                    .clickable { onToggleOverlay() }
+                    .testTag("quick_toggle_overlay_chip")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Layers,
+                        contentDescription = "System Overlay",
+                        tint = if (isOverlayActive) theme.primaryAccent else Color.LightGray,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (isOverlayActive) "Overlay ON" else "System Overlay",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isOverlayActive) theme.primaryAccent else Color.White.copy(alpha = 0.8f)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // 3. Search / Text Input Box with Dedicated Microphone Button
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp),
+                shape = RoundedCornerShape(26.dp),
+                color = Color(0xF20F172A),
+                border = BorderStroke(
+                    1.dp,
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            theme.primaryAccent.copy(alpha = 0.6f),
+                            theme.secondaryAccent.copy(alpha = 0.4f)
+                        )
+                    )
+                ),
+                shadowElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "Gemini AI",
+                        tint = theme.primaryAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Ask MAX Assistant anything...",
+                                color = Color.White.copy(alpha = 0.45f),
+                                fontSize = 14.sp
+                            )
+                        }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = onQueryChanged,
+                            singleLine = true,
+                            textStyle = TextStyle(
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Normal
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                imeAction = ImeAction.Send
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onSend = {
+                                    if (searchQuery.isNotBlank()) {
+                                        onSendQuery(searchQuery)
+                                    }
+                                }
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("search_text_input")
+                        )
+                    }
+
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(
+                            onClick = { onQueryChanged("") },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Clear",
+                                tint = Color.LightGray,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { onSendQuery(searchQuery) },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(theme.primaryAccent)
+                                .testTag("send_message_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = "Send to Gemini",
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            val micPulse by rememberInfiniteTransition(label = "mic_pulse").animateFloat(
+                initialValue = 0.95f,
+                targetValue = if (isListening) 1.15f else 1.0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(600, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "micPulse"
+            )
+
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .scale(micPulse)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            colors = if (isListening) listOf(Color(0xFFEF4444), Color(0xFFDC2626))
+                            else listOf(theme.primaryAccent, theme.secondaryAccent)
+                        )
+                    )
+                    .clickable { onMicClick() }
+                    .testTag("manual_mic_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                    contentDescription = "Manual Voice Input",
+                    tint = if (isListening) Color.White else Color.Black,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        // 4. Siri-Style Glowing Wave Animation at the bottom of the screen
+        SiriGlowWaveVisualizer(
+            isListening = isListening,
+            isProcessing = isProcessing,
+            isSpeaking = isSpeaking,
+            rmsDbLevel = rmsDbLevel,
+            theme = theme,
+            height = 36.dp,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
 // ANIMATED Siri Voice Orb Canvas Component
 @Composable
 fun SiriVoiceOrb(
@@ -1977,6 +2447,7 @@ fun SiriVoiceOrb(
     isSpeaking: Boolean,
     rmsDbLevel: Float,
     theme: SiriThemeColors,
+    statusText: String = "",
     onClick: () -> Unit
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "siri_orb_anim")
@@ -2012,6 +2483,51 @@ fun SiriVoiceOrb(
                 indication = null
             ) { onClick() }
     ) {
+        // Status text pill above orb
+        AnimatedVisibility(
+            visible = statusText.isNotBlank(),
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xD90F172A),
+                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .padding(horizontal = 24.dp, vertical = 2.dp)
+                    .widthIn(max = 340.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isSpeaking) Color(0xFF10B981)
+                                else if (isListening) Color(0xFFEF4444)
+                                else theme.primaryAccent
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = statusText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
         // Equalizer waveform bars when active
         if (isListening || isSpeaking) {
             Row(
@@ -2095,6 +2611,14 @@ fun SiriVoiceOrb(
                 )
             }
         }
+        
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = if (isSpeaking) "MAX Speaking..." else if (isListening) "Listening (Vosk)..." else "Tap MAX Orb to Speak",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (isListening || isSpeaking) theme.primaryAccent else Color.White.copy(alpha = 0.6f)
+        )
     }
 }
 
@@ -2105,13 +2629,16 @@ fun ApiKeyConfigDialog(
     onDismiss: () -> Unit
 ) {
     val geminiKey by viewModel.apiKeyText.collectAsState()
+    val isValidatingGeminiKey by viewModel.isValidatingGeminiKey.collectAsState()
+    val geminiValidationStatus by viewModel.geminiValidationStatus.collectAsState()
+
     val elevenLabsKey by viewModel.elevenLabsApiKeyText.collectAsState()
     val isValidatingKey by viewModel.isValidatingElevenLabsKey.collectAsState()
     val validationStatus by viewModel.elevenLabsValidationStatus.collectAsState()
 
     var activeTab by remember { mutableIntStateOf(0) } // 0 = ElevenLabs, 1 = Gemini
-    var tempGeminiKey by remember { mutableStateOf(geminiKey) }
-    var tempElevenLabsKey by remember { mutableStateOf(elevenLabsKey) }
+    var tempGeminiKey by remember(geminiKey) { mutableStateOf(geminiKey) }
+    var tempElevenLabsKey by remember(elevenLabsKey) { mutableStateOf(elevenLabsKey) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2133,7 +2660,11 @@ fun ApiKeyConfigDialog(
             }
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 // Tab selector for ElevenLabs / Gemini
                 Row(
                     modifier = Modifier
@@ -2277,7 +2808,7 @@ fun ApiKeyConfigDialog(
                 } else {
                     // Gemini Section
                     Text(
-                        "Enter your Gemini API key for AI response generation and context reasoning:",
+                        "Enter your Gemini API key for AI response generation and reasoning. Key is validated and saved in SharedPreferences.",
                         fontSize = 12.sp,
                         color = Color.LightGray
                     )
@@ -2300,18 +2831,81 @@ fun ApiKeyConfigDialog(
                             .testTag("gemini_api_key_input")
                     )
 
+                    if (isValidatingGeminiKey) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = theme.secondaryAccent,
+                                strokeWidth = 2.dp
+                            )
+                            Text(
+                                "Validating Gemini key with Google servers...",
+                                fontSize = 11.sp,
+                                color = theme.secondaryAccent
+                            )
+                        }
+                    }
+
+                    geminiValidationStatus?.let { status ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        val isSuccess = status.contains("verified", ignoreCase = true) || status.contains("valid", ignoreCase = true) || status.contains("saved", ignoreCase = true)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSuccess) Color(0xFF064E3B) else Color(0xFF7F1D1D),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = status,
+                                fontSize = 11.sp,
+                                color = if (isSuccess) Color(0xFF6EE7B7) else Color(0xFFFCA5A5),
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Button(
-                        onClick = {
-                            viewModel.saveApiKey(tempGeminiKey)
-                            onDismiss()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent),
-                        shape = RoundedCornerShape(10.dp),
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Save Gemini Key", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Button(
+                            onClick = {
+                                viewModel.validateAndSaveGeminiApiKey(tempGeminiKey)
+                            },
+                            enabled = !isValidatingGeminiKey && tempGeminiKey.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("validate_gemini_key_btn")
+                        ) {
+                            Text("Validate & Save", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.saveApiKey(tempGeminiKey)
+                            },
+                            enabled = tempGeminiKey.isNotBlank(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Save", color = Color.White, fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.clearApiKey()
+                                tempGeminiKey = ""
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Clear", color = Color.LightGray, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -2626,13 +3220,20 @@ fun WhatsAppControlTab(
     val status by viewModel.whatsAppStatus.collectAsState()
     val isNotifGranted = viewModel.isNotificationListenerGranted()
 
+    val recordAudioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        viewModel.refreshPermissions()
+    }
+
     var testSender by remember { mutableStateOf("Rahul Sharma") }
     var testMessage by remember { mutableStateOf("Hey, are you free for the meeting at 4 PM?") }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Notification Listener Permission Header Card
@@ -2836,7 +3437,13 @@ fun WhatsAppControlTab(
 
                             // 2. Dictate Voice Reply
                             Button(
-                                onClick = { viewModel.startDictatingWhatsAppReply(msg.id) },
+                                onClick = {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                        viewModel.startDictatingWhatsAppReply(msg.id)
+                                    } else {
+                                        recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    }
+                                },
                                 colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.weight(1f)
@@ -2953,7 +3560,8 @@ fun AutoScrollTab(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. Accessibility Service Permission Card
@@ -3331,7 +3939,8 @@ fun EmergencySosTab(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. Live Location Tracking Card
@@ -3771,7 +4380,8 @@ fun CameraAndSelfieTab(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. Camera Viewfinder & Preview Card

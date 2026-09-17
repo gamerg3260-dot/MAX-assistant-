@@ -143,6 +143,9 @@ class MaxSttManager(private val context: Context) {
                     putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("hi-IN", "en-US", "en-IN"))
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                    // Enable offline model flags (Vosk / on-device speech recognition)
+                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                    putExtra("android.speech.extra.PREFER_OFFLINE", true)
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                 }
