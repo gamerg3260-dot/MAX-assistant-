@@ -1,0 +1,6 @@
+{
+  "name": "MAX Assistant",
+  "description": "In-Call & Incoming Call Voice Assistant with Caller ID Announcement via TTS, continuous Speech-to-Text command detection (Accept/Reject), TelecomManager call controls, and background Foreground Service.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
