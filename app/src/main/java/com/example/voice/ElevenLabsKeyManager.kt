@@ -45,7 +45,7 @@ class ElevenLabsKeyManager(private val context: Context) {
      * If invalid or network fails, returns Error without saving.
      */
     suspend fun validateAndSaveApiKey(candidateKey: String): ElevenLabsKeyValidationResult = withContext(Dispatchers.IO) {
-        val trimmedKey = candidateKey.trim()
+        val trimmedKey = candidateKey.trim().removeSurrounding("\"").removeSurrounding("'")
         if (trimmedKey.isBlank()) {
             return@withContext ElevenLabsKeyValidationResult.Error("API Key cannot be empty.")
         }
@@ -53,29 +53,39 @@ class ElevenLabsKeyManager(private val context: Context) {
         try {
             val request = Request.Builder()
                 .url("https://api.elevenlabs.io/v1/user")
-                .addHeader("Accept", "application/json")
-                .addHeader("xi-api-key", trimmedKey)
+                .header("Accept", "application/json")
+                .header("xi-api-key", trimmedKey)
                 .get()
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    // Key is valid! Store securely in SharedPreferences
-                    SecureKeyManager.saveElevenLabsApiKey(context, trimmedKey)
-                    Log.i(tag, "ElevenLabs API Key successfully validated and saved.")
-                    ElevenLabsKeyValidationResult.Success("ElevenLabs API Key validated and saved successfully!")
-                } else if (response.code == 401 || response.code == 403) {
-                    Log.w(tag, "Validation failed with status ${response.code}")
-                    ElevenLabsKeyValidationResult.Error("Invalid API Key. Please verify your ElevenLabs credentials.")
-                } else {
-                    val errorMsg = response.body?.string() ?: "Validation request failed with HTTP ${response.code}"
-                    Log.w(tag, "Validation failed: $errorMsg")
-                    ElevenLabsKeyValidationResult.Error("API Validation Failed [${response.code}]: $errorMsg")
+            val (code, body, exception) = try {
+                client.newCall(request).execute().use { response ->
+                    Triple(response.code, response.body?.string() ?: "", null)
                 }
+            } catch (e: Exception) {
+                Triple(-1, "", e)
+            }
+
+            if (code == 200 || code in 200..299) {
+                // Key is valid! Store securely in SharedPreferences
+                SecureKeyManager.saveElevenLabsApiKey(context, trimmedKey)
+                Log.i(tag, "ElevenLabs API Key successfully validated and saved.")
+                ElevenLabsKeyValidationResult.Success("ElevenLabs API Key validated and saved successfully!")
+            } else if (code == 401 || code == 403) {
+                Log.w(tag, "ElevenLabs validation unauthorized (HTTP $code)")
+                ElevenLabsKeyValidationResult.Error("Unauthorized (HTTP $code): Invalid API Key. Please verify your ElevenLabs credentials.")
+            } else if (code == -1 || exception != null) {
+                val errMsg = exception?.localizedMessage ?: "Network or connection timeout"
+                Log.w(tag, "ElevenLabs network validation error: $errMsg")
+                ElevenLabsKeyValidationResult.Error("Network Error: Unable to reach ElevenLabs server ($errMsg).")
+            } else {
+                val errorMsg = if (body.isNotBlank()) body else "HTTP $code"
+                Log.w(tag, "ElevenLabs validation failed: $errorMsg")
+                ElevenLabsKeyValidationResult.Error("API Validation Failed [HTTP $code]: $errorMsg")
             }
         } catch (e: Exception) {
             Log.e(tag, "Error validating ElevenLabs API key: ${e.message}", e)
-            ElevenLabsKeyValidationResult.Error("Network error validating key: ${e.localizedMessage ?: "Unknown error"}")
+            ElevenLabsKeyValidationResult.Error("Network error: ${e.localizedMessage ?: "Connection timed out"}")
         }
     }
 

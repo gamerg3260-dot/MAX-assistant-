@@ -1,9 +1,16 @@
 package com.example.voice
 
 import android.content.Context
+import android.content.Intent
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +28,7 @@ import org.vosk.Recognizer
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.Locale
 
 sealed class WakeWordState {
     data object Uninitialized : WakeWordState()
@@ -32,17 +40,21 @@ sealed class WakeWordState {
 }
 
 /**
- * Continuous Offline Wake-Word ("Hey Max") Detector powered by Vosk.
- * Uses strict keyword grammar ["hey max", "[unk]"] with 16kHz Mono 16-bit PCM AudioRecord.
+ * Continuous Offline Wake-Word ("Hey Max") Detector powered by Vosk,
+ * with automatic fallback to Android SpeechRecognizer if native model files are absent.
  */
 class VoskWakeWordDetector(private val context: Context) {
 
     private val tag = "VoskWakeWordDetector"
     private val scope = CoroutineScope(Dispatchers.IO + Job())
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private var voskModel: Model? = null
     private var voskRecognizer: Recognizer? = null
     private var audioRecord: AudioRecord? = null
+
+    private var useSpeechRecognizerFallback = false
+    private var fallbackRecognizer: SpeechRecognizer? = null
 
     private var recordingJob: Job? = null
     private var isPaused = false
@@ -63,10 +75,13 @@ class VoskWakeWordDetector(private val context: Context) {
     }
 
     /**
-     * Initializes the Vosk model from assets and prepares the recognizer with strict keyword grammar.
+     * Initializes the Vosk model from assets or activates Android SpeechRecognizer fallback.
      */
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
         if (voskModel != null && voskRecognizer != null) {
+            return@withContext true
+        }
+        if (useSpeechRecognizerFallback) {
             return@withContext true
         }
 
@@ -75,12 +90,17 @@ class VoskWakeWordDetector(private val context: Context) {
 
         try {
             val modelDir = extractOrGetModelDir()
-            if (modelDir == null || !modelDir.exists()) {
-                val err = "Vosk model assets not found in app/src/main/assets/model-en"
-                Log.e(tag, err)
-                _state.value = WakeWordState.Error(err)
-                onError?.invoke(err)
-                return@withContext false
+            val hasModelBinaryFiles = modelDir != null && modelDir.exists() && (
+                File(modelDir, "am/final.mdl").exists() ||
+                File(modelDir, "final.mdl").exists() ||
+                File(modelDir, "am").exists()
+            )
+
+            if (!hasModelBinaryFiles) {
+                Log.w(tag, "Vosk offline model binary files ('am/final.mdl') not present in assets. Using Android SpeechRecognizer fallback for 'Hey Max' wake word detection.")
+                useSpeechRecognizerFallback = true
+                _state.value = WakeWordState.Listening
+                return@withContext true
             }
 
             voskModel = Model(modelDir.absolutePath)
@@ -89,11 +109,10 @@ class VoskWakeWordDetector(private val context: Context) {
             _state.value = WakeWordState.Listening
             true
         } catch (e: Exception) {
-            val err = "Vosk initialization failed: ${e.localizedMessage ?: e.message}"
-            Log.e(tag, err, e)
-            _state.value = WakeWordState.Error(err)
-            onError?.invoke(err)
-            false
+            Log.w(tag, "Vosk native model load exception (${e.message}). Activating Android SpeechRecognizer fallback for 'Hey Max'.")
+            useSpeechRecognizerFallback = true
+            _state.value = WakeWordState.Listening
+            true
         }
     }
 
@@ -105,7 +124,6 @@ class VoskWakeWordDetector(private val context: Context) {
         val am = context.assets
 
         try {
-            // Direct recursive copy of asset model-en to internal storage
             copyAssetFolder(am, "model-en", targetDir)
             if (targetDir.exists() && (targetDir.listFiles()?.isNotEmpty() == true)) {
                 return targetDir
@@ -149,7 +167,7 @@ class VoskWakeWordDetector(private val context: Context) {
      * Starts continuous background listening for "Hey Max".
      */
     fun startListening() {
-        if (isRunning && recordingJob?.isActive == true) {
+        if (isRunning && (recordingJob?.isActive == true || fallbackRecognizer != null)) {
             isPaused = false
             _state.value = WakeWordState.Listening
             return
@@ -160,11 +178,13 @@ class VoskWakeWordDetector(private val context: Context) {
 
         recordingJob = scope.launch {
             if (voskModel == null || voskRecognizer == null) {
-                val ok = initialize()
-                if (!ok) {
-                    isRunning = false
-                    return@launch
-                }
+                initialize()
+            }
+
+            if (useSpeechRecognizerFallback) {
+                Log.i(tag, "Starting SpeechRecognizer fallback for 'Hey Max' wake-word detection...")
+                startSpeechRecognizerFallback()
+                return@launch
             }
 
             val bufferSize = AudioRecord.getMinBufferSize(
@@ -215,7 +235,6 @@ class VoskWakeWordDetector(private val context: Context) {
                     while (isActive && isRunning && !isPaused && audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                         val readCount = audioRecord?.read(audioBuffer, 0, audioBuffer.size) ?: 0
                         if (readCount > 0) {
-                            // Compute RMS level for visualizers / telemetry
                             var sum = 0.0
                             for (i in 0 until readCount) {
                                 val s = audioBuffer[i]
@@ -258,11 +277,96 @@ class VoskWakeWordDetector(private val context: Context) {
         }
     }
 
+    private fun startSpeechRecognizerFallback() {
+        if (!isRunning || isPaused) return
+        mainHandler.post {
+            try {
+                if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                    Log.w(tag, "Android SpeechRecognizer is not available on this device.")
+                    return@post
+                }
+
+                fallbackRecognizer?.destroy()
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+                fallbackRecognizer = recognizer
+
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                }
+
+                recognizer.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        _state.value = WakeWordState.Listening
+                    }
+
+                    override fun onBeginningOfSpeech() {}
+
+                    override fun onRmsChanged(rmsdB: Float) {
+                        _rmsDbLevel.value = rmsdB.coerceAtLeast(0f)
+                    }
+
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+
+                    override fun onEndOfSpeech() {}
+
+                    override fun onError(error: Int) {
+                        Log.d(tag, "Fallback SpeechRecognizer onError code: $error")
+                        fallbackRecognizer?.destroy()
+                        fallbackRecognizer = null
+                        if (isRunning && !isPaused) {
+                            mainHandler.postDelayed({ startSpeechRecognizerFallback() }, 1500L)
+                        }
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        processFallbackSpeechResults(results)
+                        restartFallbackAfterDelay()
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        processFallbackSpeechResults(partialResults)
+                    }
+
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+
+                recognizer.startListening(intent)
+            } catch (e: Exception) {
+                Log.e(tag, "Error starting Fallback SpeechRecognizer", e)
+            }
+        }
+    }
+
+    private fun processFallbackSpeechResults(results: Bundle?) {
+        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+        for (match in matches) {
+            val lower = match.lowercase(Locale.ROOT)
+            if (lower.contains("hey max") || lower.contains("max") || lower.contains("hey macs") || lower.contains("hey mark")) {
+                Log.i(tag, "Wake-Word detected via SpeechRecognizer fallback: '$match'")
+                pauseListening()
+                _state.value = WakeWordState.Triggered("Hey Max")
+                onWakeWordDetected?.invoke("Hey Max")
+                break
+            }
+        }
+    }
+
+    private fun restartFallbackAfterDelay() {
+        fallbackRecognizer?.destroy()
+        fallbackRecognizer = null
+        if (isRunning && !isPaused) {
+            mainHandler.postDelayed({ startSpeechRecognizerFallback() }, 500L)
+        }
+    }
+
     private fun checkAndTriggerWakeWord(jsonResult: String): Boolean {
         if (jsonResult.isBlank()) return false
         return try {
             val json = JSONObject(jsonResult)
-            val text = (json.optString("text", "") + " " + json.optString("partial", "")).lowercase().trim()
+            val text = (json.optString("text", "") + " " + json.optString("partial", "")).lowercase(Locale.ROOT).trim()
 
             if (text.contains("hey max") || text.contains("max") || text.contains("hey")) {
                 Log.i(tag, ">>> WAKE-WORD TRIGGERED: '$text' <<<")
@@ -285,12 +389,25 @@ class VoskWakeWordDetector(private val context: Context) {
         isPaused = true
         _state.value = WakeWordState.Paused
         _rmsDbLevel.value = 0f
-        try {
-            if (audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                audioRecord?.stop()
+
+        if (useSpeechRecognizerFallback) {
+            mainHandler.post {
+                try {
+                    fallbackRecognizer?.stopListening()
+                    fallbackRecognizer?.destroy()
+                    fallbackRecognizer = null
+                } catch (e: Exception) {
+                    Log.w(tag, "Error stopping fallback recognizer: ${e.message}")
+                }
             }
-        } catch (e: Exception) {
-            Log.w(tag, "Error stopping audioRecord on pause: ${e.message}")
+        } else {
+            try {
+                if (audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                    audioRecord?.stop()
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "Error stopping audioRecord on pause: ${e.message}")
+            }
         }
     }
 
@@ -299,10 +416,13 @@ class VoskWakeWordDetector(private val context: Context) {
      */
     fun resumeListening() {
         isPaused = false
-        if (!isRunning || recordingJob?.isActive != true) {
+        if (!isRunning || (recordingJob?.isActive != true && fallbackRecognizer == null)) {
             startListening()
         } else {
             _state.value = WakeWordState.Listening
+            if (useSpeechRecognizerFallback && fallbackRecognizer == null) {
+                startSpeechRecognizerFallback()
+            }
         }
     }
 
@@ -315,6 +435,16 @@ class VoskWakeWordDetector(private val context: Context) {
         _state.value = WakeWordState.Uninitialized
         recordingJob?.cancel()
         recordingJob = null
+
+        mainHandler.post {
+            try {
+                fallbackRecognizer?.cancel()
+                fallbackRecognizer?.destroy()
+                fallbackRecognizer = null
+            } catch (e: Exception) {
+                Log.w(tag, "Error cleaning fallback recognizer: ${e.message}")
+            }
+        }
 
         try {
             if (audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {

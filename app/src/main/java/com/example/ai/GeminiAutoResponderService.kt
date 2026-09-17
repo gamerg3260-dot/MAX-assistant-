@@ -34,9 +34,10 @@ class GeminiAutoResponderService(private val context: Context) {
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(25, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .writeTimeout(8, TimeUnit.SECONDS)
+            .callTimeout(15, TimeUnit.SECONDS)
             .build()
     }
 
@@ -143,47 +144,67 @@ class GeminiAutoResponderService(private val context: Context) {
         }
 
         val initialModel = when (modelName.trim()) {
-            "", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash" -> "gemini-2.5-flash"
+            "", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest" -> "gemini-3.6-flash"
             else -> modelName.trim()
         }
 
-        val modelsToTry = listOf(initialModel, "gemini-flash-latest").distinct()
+        val modelsToTry = listOf(initialModel, "gemini-3.6-flash", "gemini-1.5-flash", "gemini-2.5-flash").distinct()
 
         return@withContext try {
-            withTimeout(25_000L) {
+            withTimeout(30_000L) {
                 var lastResult: AiResult = AiResult.Error("Failed to contact Gemini API")
 
                 for (resolvedModel in modelsToTry) {
                     val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:generateContent?key=$apiKey"
 
-                    val jsonBody = JSONObject().apply {
-                        val contentsArray = JSONArray().apply {
-                            val contentObj = JSONObject().apply {
-                                val partsArray = JSONArray().apply {
-                                    val partObj = JSONObject().apply {
-                                        put("text", prompt)
+                    var code = 0
+                    var responseBody = ""
+                    val max503Retries = 2
+
+                    for (attempt in 0..max503Retries) {
+                        val jsonBody = JSONObject().apply {
+                            val contentsArray = JSONArray().apply {
+                                val contentObj = JSONObject().apply {
+                                    val partsArray = JSONArray().apply {
+                                        val partObj = JSONObject().apply {
+                                            put("text", prompt)
+                                        }
+                                        put(partObj)
                                     }
-                                    put(partObj)
+                                    put("parts", partsArray)
                                 }
-                                put("parts", partsArray)
+                                put(contentObj)
                             }
-                            put(contentObj)
+                            put("contents", contentsArray)
+
+                            val genConfig = JSONObject().apply {
+                                put("temperature", 0.7)
+                            }
+                            put("generationConfig", genConfig)
                         }
-                        put("contents", contentsArray)
 
-                        val genConfig = JSONObject().apply {
-                            put("temperature", 0.7)
+                        val request = Request.Builder()
+                            .url(url)
+                            .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                            .build()
+
+                        val (resCode, resBody) = try {
+                            httpClient.newCall(request).execute().use { response ->
+                                Pair(response.code, response.body?.string() ?: "")
+                            }
+                        } catch (e: Exception) {
+                            Pair(-1, e.message ?: "Network error")
                         }
-                        put("generationConfig", genConfig)
-                    }
 
-                    val request = Request.Builder()
-                        .url(url)
-                        .post(jsonBody.toString().toRequestBody(jsonMediaType))
-                        .build()
+                        code = resCode
+                        responseBody = resBody
 
-                    val (code, responseBody) = httpClient.newCall(request).execute().use { response ->
-                        Pair(response.code, response.body?.string() ?: "")
+                        if (code == 503 && attempt < max503Retries) {
+                            Log.w(tag, "Gemini API ($resolvedModel) 503 Service Unavailable on attempt ${attempt + 1}. Retrying in 2 seconds...")
+                            kotlinx.coroutines.delay(2000L)
+                            continue
+                        }
+                        break
                     }
 
                     if (code in 200..299) {
@@ -201,8 +222,9 @@ class GeminiAutoResponderService(private val context: Context) {
                     val parsedError = parseErrorMessage(responseBody)
                     lastResult = AiResult.Error("AI Error ($code): $parsedError", isQuotaOrAuth = isAuthOrQuota)
 
-                    if (code != 404) {
-                        // For non-404 errors (e.g. auth error, quota exhausted), do not fallback, report directly
+                    val isFallbackEligible = code == -1 || code == 404 || code in 500..599
+                    if (!isFallbackEligible) {
+                        // For non-recoverable client errors (e.g. 400 bad request, 401/403 auth error, 429 quota limit), stop and report directly
                         return@withTimeout lastResult
                     }
                 }
@@ -211,7 +233,7 @@ class GeminiAutoResponderService(private val context: Context) {
             }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             Log.e(tag, "Gemini API request timed out", e)
-            AiResult.Error("Request timed out (25s exceeded). Check network connectivity.")
+            AiResult.Error("Request timed out (30s exceeded). Check network connectivity.")
         } catch (e: Exception) {
             Log.e(tag, "Gemini API execution failed", e)
             val msg = e.localizedMessage ?: e.message ?: "Unknown error"
@@ -228,8 +250,9 @@ class GeminiAutoResponderService(private val context: Context) {
      * Models to attempt during key validation in order of preference.
      */
     private val validationCandidateModels = listOf(
-        "gemini-2.5-flash",
-        "gemini-flash-latest"
+        "gemini-3.6-flash",
+        "gemini-1.5-flash",
+        "gemini-2.5-flash"
     )
 
     /**
@@ -237,7 +260,7 @@ class GeminiAutoResponderService(private val context: Context) {
      * If validated successfully or if rate-limited / network slow, allows saving smoothly.
      */
     suspend fun validateAndSaveApiKey(candidateKey: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
-        val trimmed = candidateKey.trim()
+        val trimmed = candidateKey.trim().removeSurrounding("\"").removeSurrounding("'")
         if (trimmed.isBlank()) {
             return@withContext GeminiKeyValidationResult.Error("Gemini API key cannot be empty.")
         }
@@ -246,41 +269,57 @@ class GeminiAutoResponderService(private val context: Context) {
         val looksLikeGoogleApiKey = trimmed.startsWith("AIzaSy") && trimmed.length >= 35
 
         try {
-            withTimeout(15_000L) {
+            withTimeout(20_000L) {
                 var lastErrorMessage = ""
                 var lastCode = 0
 
                 for (model in validationCandidateModels) {
                     val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$trimmed"
 
-                    val jsonBody = JSONObject().apply {
-                        val contentsArray = JSONArray().apply {
-                            val contentObj = JSONObject().apply {
-                                val partsArray = JSONArray().apply {
-                                    val partObj = JSONObject().apply {
-                                        put("text", "Hi")
+                    var statusCode = 0
+                    var bodyString = ""
+                    val max503Retries = 2
+
+                    for (attempt in 0..max503Retries) {
+                        val jsonBody = JSONObject().apply {
+                            val contentsArray = JSONArray().apply {
+                                val contentObj = JSONObject().apply {
+                                    val partsArray = JSONArray().apply {
+                                        val partObj = JSONObject().apply {
+                                            put("text", "ping")
+                                        }
+                                        put(partObj)
                                     }
-                                    put(partObj)
+                                    put("parts", partsArray)
                                 }
-                                put("parts", partsArray)
+                                put(contentObj)
                             }
-                            put(contentObj)
+                            put("contents", contentsArray)
                         }
-                        put("contents", contentsArray)
-                    }
 
-                    val request = Request.Builder()
-                        .url(url)
-                        .post(jsonBody.toString().toRequestBody(jsonMediaType))
-                        .build()
+                        val request = Request.Builder()
+                            .url(url)
+                            .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                            .build()
 
-                    val (statusCode, bodyString) = try {
-                        httpClient.newCall(request).execute().use { resp ->
-                            Pair(resp.code, resp.body?.string() ?: "")
+                        val (code, body) = try {
+                            httpClient.newCall(request).execute().use { resp ->
+                                Pair(resp.code, resp.body?.string() ?: "")
+                            }
+                        } catch (e: Exception) {
+                            Log.w(tag, "Model $model validation network exception: ${e.message}")
+                            Pair(-1, e.message ?: "Network error")
                         }
-                    } catch (e: Exception) {
-                        Log.w(tag, "Model $model validation network exception: ${e.message}")
-                        Pair(-1, e.message ?: "Network error")
+
+                        statusCode = code
+                        bodyString = body
+
+                        if (statusCode == 503 && attempt < max503Retries) {
+                            Log.w(tag, "Gemini validation ($model) received 503 on attempt ${attempt + 1}. Retrying in 2 seconds...")
+                            kotlinx.coroutines.delay(2000L)
+                            continue
+                        }
+                        break
                     }
 
                     if (statusCode in 200..299) {
@@ -304,7 +343,16 @@ class GeminiAutoResponderService(private val context: Context) {
                     } else if (statusCode == 403 || lastErrorMessage.contains("PERMISSION_DENIED", ignoreCase = true)) {
                         return@withTimeout GeminiKeyValidationResult.Error("Permission denied for this key. Ensure Gemini API is enabled.")
                     }
-                    // If 404 (model not found / deprecated) or network timeout on first attempt, continue loop to next candidate model
+                    // If 404 / 503, continue loop to next candidate model
+                }
+
+                if (lastCode == 503 || lastErrorMessage.contains("UNAVAILABLE", ignoreCase = true) || lastErrorMessage.contains("overloaded", ignoreCase = true)) {
+                    if (looksLikeGoogleApiKey) {
+                        SecureKeyManager.saveApiKey(context, trimmed)
+                        return@withTimeout GeminiKeyValidationResult.Success("Gemini API key saved! (Google servers temporarily overloaded, retry shortly).")
+                    } else {
+                        return@withTimeout GeminiKeyValidationResult.Error("Google Gemini service is currently unavailable (HTTP 503). Please try again in a few moments.")
+                    }
                 }
 
                 if (looksLikeGoogleApiKey) {
@@ -322,7 +370,6 @@ class GeminiAutoResponderService(private val context: Context) {
                 SecureKeyManager.saveApiKey(context, trimmed)
                 GeminiKeyValidationResult.Success("Gemini API key verified & saved (Quota rate-limited).")
             } else if (looksLikeGoogleApiKey || msg.contains("timeout", ignoreCase = true)) {
-                // If the key has standard Google format, allow saving so user is not blocked by transient container timeouts
                 SecureKeyManager.saveApiKey(context, trimmed)
                 GeminiKeyValidationResult.Success("Gemini API key saved! (Network verification timed out).")
             } else {

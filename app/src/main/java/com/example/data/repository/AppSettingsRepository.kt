@@ -53,7 +53,7 @@ data class AppSettings(
     val selectedPersona: String = "In a Meeting",
     val customInstructions: String = "I am currently tied up in an important meeting and unable to answer calls or reply immediately. I will get back to you as soon as I am free.",
     val responseTone: String = "Professional",
-    val modelName: String = "gemini-2.5-flash",
+    val modelName: String = "gemini-3.6-flash",
     val antiSpamCooldownMinutes: Int = 3
 )
 
@@ -108,7 +108,7 @@ class AppSettingsRepository(context: Context) {
                 "I am currently in an important meeting and unable to take calls or reply directly right now. I will review your message and get back to you promptly."
             ) ?: "",
             responseTone = prefs.getString("response_tone", "Professional") ?: "Professional",
-            modelName = prefs.getString("model_name", "gemini-2.5-flash") ?: "gemini-2.5-flash",
+            modelName = prefs.getString("model_name", "gemini-3.6-flash") ?: "gemini-3.6-flash",
             antiSpamCooldownMinutes = prefs.getInt("anti_spam_cooldown_minutes", 3)
         )
     }
