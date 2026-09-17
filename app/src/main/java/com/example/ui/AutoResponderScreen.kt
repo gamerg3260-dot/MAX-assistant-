@@ -8,6 +8,9 @@ import android.net.Uri
 import android.util.Log
 import java.util.Locale
 import android.text.format.DateFormat
+import androidx.camera.view.PreviewView
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -62,6 +65,12 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -333,12 +342,13 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
                     when (selectedTabIndex) {
                         0 -> VoiceCallAnnouncerTab(viewModel, settings, currentTheme)
                         1 -> WhatsAppControlTab(viewModel, currentTheme)
-                        2 -> AutoScrollTab(viewModel, currentTheme)
-                        3 -> EmergencySosTab(viewModel, currentTheme)
-                        4 -> BlocklistSpamTab(viewModel, settings, currentTheme)
-                        5 -> HardwareSystemControlTab(viewModel, settings, currentTheme)
-                        6 -> AppMediaControlTab(viewModel, settings, currentTheme)
-                        7 -> WorkbenchAndEventsTab(viewModel, settings, events, callHistoryLogs, acceptedCallsCount, rejectedCallsCount, simCallState, currentTheme)
+                        2 -> CameraAndSelfieTab(viewModel, currentTheme)
+                        3 -> AutoScrollTab(viewModel, currentTheme)
+                        4 -> EmergencySosTab(viewModel, currentTheme)
+                        5 -> BlocklistSpamTab(viewModel, settings, currentTheme)
+                        6 -> HardwareSystemControlTab(viewModel, settings, currentTheme)
+                        7 -> AppMediaControlTab(viewModel, settings, currentTheme)
+                        8 -> WorkbenchAndEventsTab(viewModel, settings, events, callHistoryLogs, acceptedCallsCount, rejectedCallsCount, simCallState, currentTheme)
                     }
                 }
 
@@ -575,6 +585,7 @@ fun SiriCategorizedTabRow(
     val tabs = listOf(
         "Voice Call",
         "WhatsApp",
+        "Camera & Selfie",
         "Auto Scroll",
         "Emergency SOS",
         "Blocklist",
@@ -3724,6 +3735,473 @@ fun EmergencySosTab(
                         Icon(imageVector = Icons.Default.Send, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Execute Spoken Emergency Command", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CameraAndSelfieTab(
+    viewModel: AutoResponderViewModel,
+    theme: SiriThemeColors
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val isFrontCamera by viewModel.isFrontCamera.collectAsState()
+    val isRecordingVideo by viewModel.isRecordingVideo.collectAsState()
+    val cameraZoomRatio by viewModel.cameraZoomRatio.collectAsState()
+    val lastCapturedPhotoUri by viewModel.lastCapturedPhotoUri.collectAsState()
+    val lastCapturedVideoUri by viewModel.lastCapturedVideoUri.collectAsState()
+    val cameraStatus by viewModel.cameraStatus.collectAsState()
+
+    var testCameraVoiceCmd by remember { mutableStateOf("take selfie") }
+
+    val hasCamPerm = viewModel.maxCameraManager.hasCameraPermission()
+    val hasAudioPerm = viewModel.maxCameraManager.hasAudioPermission()
+
+    val permLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        // Trigger recomposition
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // 1. Camera Viewfinder & Preview Card
+        item {
+            SiriGlassCard(theme = theme) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = null,
+                                tint = theme.primaryAccent
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Camera & Voice Selfie Studio",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (hasCamPerm) theme.primaryAccent.copy(alpha = 0.2f) else Color(0xFFFFB300).copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, if (hasCamPerm) theme.primaryAccent else Color(0xFFFFB300))
+                        ) {
+                            Text(
+                                text = if (hasCamPerm) "CAMERA READY" else "PERM REQUIRED",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (hasCamPerm) theme.primaryAccent else Color(0xFFFFB300),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (!hasCamPerm || !hasAudioPerm) {
+                        Text(
+                            text = "Grant Camera and Audio permissions so MAX can trigger voice selfie captures, control zoom levels, and record videos hands-free.",
+                            fontSize = 12.sp,
+                            color = Color.LightGray
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                permLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.CAMERA,
+                                        Manifest.permission.RECORD_AUDIO
+                                    )
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("grant_camera_perm_btn")
+                        ) {
+                            Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null, tint = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Grant Camera & Mic Permissions", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    } else {
+                        // Live Viewfinder Preview Container
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(260.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.Black)
+                                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+                        ) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    PreviewView(ctx).apply {
+                                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                                        viewModel.maxCameraManager.bindCamera(
+                                            lifecycleOwner,
+                                            surfaceProvider
+                                        )
+                                    }
+                                },
+                                update = {
+                                    // Live updates handled by CameraX binding
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+
+                            // Top Viewfinder Badges Overlay
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.3f))
+                                ) {
+                                    Text(
+                                        text = if (isFrontCamera) "FRONT / SELFIE" else "REAR / MAIN",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    border = BorderStroke(0.5.dp, theme.primaryAccent)
+                                ) {
+                                    Text(
+                                        text = "${String.format(Locale.ROOT, "%.1f", cameraZoomRatio)}x ZOOM",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = theme.primaryAccent,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            // Active Recording Red Pulse Badge
+                            if (isRecordingVideo) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFFFF3D00),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(Color.White, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "REC VIDEO",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Controls Bar: Switch Camera, Big Shutter, Video Record
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Switch Lens Button
+                            IconButton(
+                                onClick = { viewModel.switchCamera() },
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .background(Color.White.copy(alpha = 0.12f), CircleShape)
+                                    .testTag("switch_camera_lens_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Cameraswitch,
+                                    contentDescription = "Switch Camera",
+                                    tint = Color.White
+                                )
+                            }
+
+                            // Big Circular Photo Capture Shutter Button
+                            Button(
+                                onClick = { viewModel.takeCameraPhoto() },
+                                shape = CircleShape,
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                                modifier = Modifier
+                                    .size(60.dp)
+                                    .testTag("take_photo_shutter_btn"),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoCamera,
+                                    contentDescription = "Take Photo",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+
+                            // Video Record Toggle Button
+                            IconButton(
+                                onClick = {
+                                    if (isRecordingVideo) {
+                                        viewModel.stopVideoRecording()
+                                    } else {
+                                        viewModel.startVideoRecording()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .background(if (isRecordingVideo) Color(0xFFFF3D00) else Color.White.copy(alpha = 0.12f), CircleShape)
+                                    .testTag("toggle_video_recording_btn")
+                            ) {
+                                Icon(
+                                    imageVector = if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam,
+                                    contentDescription = if (isRecordingVideo) "Stop Recording" else "Start Recording",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Quick Zoom Level Selection Bar
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Zoom:", fontSize = 11.sp, color = Color.LightGray)
+
+                            listOf(1.0f, 2.0f, 3.0f, 5.0f).forEach { ratio ->
+                                val isSelected = (cameraZoomRatio == ratio)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { viewModel.setCameraZoom(ratio) },
+                                    label = { Text("${ratio.toInt()}x", fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = theme.primaryAccent,
+                                        selectedLabelColor = Color.Black,
+                                        containerColor = Color.White.copy(alpha = 0.1f),
+                                        labelColor = Color.White
+                                    ),
+                                    modifier = Modifier.height(28.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.weight(1f))
+
+                            IconButton(
+                                onClick = { viewModel.zoomOutCamera() },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.ZoomOut, contentDescription = "Zoom Out", tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
+
+                            IconButton(
+                                onClick = { viewModel.zoomInCamera() },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.ZoomIn, contentDescription = "Zoom In", tint = theme.primaryAccent, modifier = Modifier.size(16.dp))
+                            }
+                        }
+
+                        cameraStatus?.let { status ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = status,
+                                fontSize = 11.sp,
+                                color = theme.primaryAccent,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Voice Controlled Camera Commands Reference & Interactive Simulator
+        item {
+            SiriGlassCard(theme = theme) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Mic, contentDescription = null, tint = theme.secondaryAccent)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Spoken Camera Voice Commands & Simulator", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Speak these phrases hands-free to control photo capture, zoom levels, and video recording:",
+                        fontSize = 11.sp,
+                        color = Color.LightGray
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val cameraCmdList = listOf(
+                        "• Photo/Selfie Shutter: \"Take photo\", \"Take selfie\", \"Say cheese\", \"Cheers\", \"फोटो खींचो\", \"सेल्फी लो\"",
+                        "• Zoom Controls: \"Zoom in\", \"Zoom out\", \"Zoom 2x\", \"Zoom 3x\", \"Reset zoom\", \"ज़ूम करो\"",
+                        "• Video Recording: \"Start recording\", \"Stop recording\", \"Record video\", \"रिकॉर्डिंग चालू करो\"",
+                        "• Lens Switch: \"Front camera\", \"Back camera\", \"Switch camera\", \"कैमरा बदलो\""
+                    )
+
+                    cameraCmdList.forEach { cmd ->
+                        Text(text = cmd, fontSize = 10.sp, color = Color.White.copy(alpha = 0.85f), lineHeight = 14.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = testCameraVoiceCmd,
+                        onValueChange = { testCameraVoiceCmd = it },
+                        label = { Text("Simulate Spoken Camera Command", color = Color.LightGray, fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = theme.secondaryAccent,
+                            unfocusedBorderColor = Color.Gray,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("test_camera_voice_cmd_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = { viewModel.processSttUserQuery(testCameraVoiceCmd) },
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("test_camera_voice_cmd_btn")
+                    ) {
+                        Icon(imageVector = Icons.Default.Send, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Execute Spoken Camera Command", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        // 3. Captured Media Preview Card
+        item {
+            SiriGlassCard(theme = theme) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.VideoLibrary, contentDescription = null, tint = theme.primaryAccent)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Captured Gallery Media", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color.White.copy(alpha = 0.06f),
+                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.15f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Last Captured Photo", fontSize = 10.sp, color = Color.LightGray)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                if (lastCapturedPhotoUri != null) {
+                                    Text("Saved to Gallery", fontSize = 11.sp, color = theme.primaryAccent, fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedButton(
+                                        onClick = {
+                                            try {
+                                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                    setDataAndType(lastCapturedPhotoUri, "image/*")
+                                                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                                }
+                                                context.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                Log.e("CameraTab", "Open photo failed: ${e.message}")
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("View Photo", fontSize = 10.sp)
+                                    }
+                                } else {
+                                    Text("No photo captured yet", fontSize = 11.sp, color = Color.Gray)
+                                }
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color.White.copy(alpha = 0.06f),
+                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.15f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Last Captured Video", fontSize = 10.sp, color = Color.LightGray)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                if (lastCapturedVideoUri != null) {
+                                    Text("Saved to Movies", fontSize = 11.sp, color = theme.secondaryAccent, fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedButton(
+                                        onClick = {
+                                            try {
+                                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                    setDataAndType(lastCapturedVideoUri, "video/*")
+                                                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                                }
+                                                context.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                Log.e("CameraTab", "Open video failed: ${e.message}")
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Play Video", fontSize = 10.sp)
+                                    }
+                                } else {
+                                    Text("No video recorded yet", fontSize = 11.sp, color = Color.Gray)
+                                }
+                            }
+                        }
                     }
                 }
             }

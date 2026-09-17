@@ -130,6 +130,15 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val isSosDispatching: StateFlow<Boolean> = emergencySosManager.isDispatching
     val sosStatus: StateFlow<String?> = emergencySosManager.lastSosStatus
 
+    // Camera & Selfie Trigger State Flows
+    val maxCameraManager = app.maxCameraManager
+    val isFrontCamera: StateFlow<Boolean> = maxCameraManager.isFrontCamera
+    val isRecordingVideo: StateFlow<Boolean> = maxCameraManager.isRecordingVideo
+    val cameraZoomRatio: StateFlow<Float> = maxCameraManager.zoomRatio
+    val lastCapturedPhotoUri: StateFlow<android.net.Uri?> = maxCameraManager.lastCapturedPhotoUri
+    val lastCapturedVideoUri: StateFlow<android.net.Uri?> = maxCameraManager.lastCapturedVideoUri
+    val cameraStatus: StateFlow<String?> = maxCameraManager.cameraStatus
+
     // Service & Voice reactive state flows
     val isServiceRunning: StateFlow<Boolean> = MaxAssistantForegroundService.isServiceRunning
     val liveCallStatus: StateFlow<String> = MaxAssistantForegroundService.liveCallStatus
@@ -394,6 +403,24 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             if (sosRes.isHandled) {
                 val feedback = sosRes.feedbackMessage
                 _sttPipelineStatus.value = "Emergency SOS Action: $feedback"
+
+                val currentList = _sttConversationLog.value.toMutableList()
+                currentList.add(Pair(spokenText, feedback))
+                _sttConversationLog.value = currentList
+
+                if (elevenLabsKeyManager.hasValidApiKey()) {
+                    testElevenLabsVoice(text = feedback) {}
+                } else {
+                    fallbackAndroidTts(feedback)
+                }
+                return@launch
+            }
+
+            // 2. Check for Camera & Selfie Trigger voice commands
+            val cameraRes = maxCameraManager.processVoiceCameraCommand(spokenText)
+            if (cameraRes.isHandled) {
+                val feedback = cameraRes.feedbackMessage
+                _sttPipelineStatus.value = "Camera Action: $feedback"
 
                 val currentList = _sttConversationLog.value.toMutableList()
                 currentList.add(Pair(spokenText, feedback))
@@ -1036,5 +1063,34 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
 
     fun removeSosContact(number: String) {
         emergencySosManager.removeSosContact(number)
+    }
+
+    // Camera Helpers
+    fun switchCamera() {
+        maxCameraManager.switchCamera()
+    }
+
+    fun takeCameraPhoto(onComplete: ((android.net.Uri?) -> Unit)? = null) {
+        maxCameraManager.takePhoto(onComplete)
+    }
+
+    fun setCameraZoom(ratio: Float) {
+        maxCameraManager.setZoomRatio(ratio)
+    }
+
+    fun zoomInCamera() {
+        maxCameraManager.zoomIn()
+    }
+
+    fun zoomOutCamera() {
+        maxCameraManager.zoomOut()
+    }
+
+    fun startVideoRecording() {
+        maxCameraManager.startVideoRecording()
+    }
+
+    fun stopVideoRecording() {
+        maxCameraManager.stopVideoRecording()
     }
 }

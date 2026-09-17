@@ -51,6 +51,9 @@ class AutoResponderApp : Application() {
     lateinit var emergencySosManager: com.example.sos.EmergencySosManager
         private set
 
+    lateinit var maxCameraManager: com.example.camera.MaxCameraManager
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -67,6 +70,7 @@ class AutoResponderApp : Application() {
         maxSttManager = com.example.voice.MaxSttManager(this)
         deviceToggleManager = com.example.toggle.DeviceToggleManager(this)
         emergencySosManager = com.example.sos.EmergencySosManager.getInstance(this)
+        maxCameraManager = com.example.camera.MaxCameraManager.getInstance(this)
     }
 
     companion object {
