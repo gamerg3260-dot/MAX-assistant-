@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">MAX Assistant</string>
+    <string name="accessibility_service_description">MAX Assistant Accessibility Service allows hands-free voice-controlled screen scrolling, gesture swiping, and automated text typing in social media feeds and forms.</string>
 </resources>

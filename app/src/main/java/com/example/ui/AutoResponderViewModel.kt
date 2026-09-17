@@ -12,8 +12,11 @@ import com.example.security.SecureKeyManager
 import com.example.service.MaxAssistantForegroundService
 import com.example.telephony.SendSmsResult
 import com.example.voice.ContactResolver
+import com.example.voice.MaxSttState
 import com.example.voice.VoiceCommand
 import com.example.voice.VoiceDetectorState
+import com.example.whatsapp.WhatsAppControlManager
+import com.example.whatsapp.WhatsAppMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -78,6 +81,55 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     private val _apiKeyText = MutableStateFlow(SecureKeyManager.getApiKey(application))
     val apiKeyText: StateFlow<String> = _apiKeyText.asStateFlow()
 
+    private val _elevenLabsApiKeyText = MutableStateFlow(app.elevenLabsKeyManager.getApiKey())
+    val elevenLabsApiKeyText: StateFlow<String> = _elevenLabsApiKeyText.asStateFlow()
+
+    private val _isValidatingElevenLabsKey = MutableStateFlow(false)
+    val isValidatingElevenLabsKey: StateFlow<Boolean> = _isValidatingElevenLabsKey.asStateFlow()
+
+    private val _elevenLabsValidationStatus = MutableStateFlow<String?>(null)
+    val elevenLabsValidationStatus: StateFlow<String?> = _elevenLabsValidationStatus.asStateFlow()
+
+    val elevenLabsKeyManager = app.elevenLabsKeyManager
+    val elevenLabsService = app.elevenLabsTtsService
+    val maxSttManager = app.maxSttManager
+
+    // STT State Flows
+    val sttState: StateFlow<MaxSttState> = maxSttManager.sttState
+    val sttRmsDbLevel: StateFlow<Float> = maxSttManager.rmsDbLevel
+    val sttPartialText: StateFlow<String> = maxSttManager.partialText
+
+    private val _sttConversationLog = MutableStateFlow<List<Pair<String, String>>>(emptyList()) // Pair(User, AI)
+    val sttConversationLog: StateFlow<List<Pair<String, String>>> = _sttConversationLog.asStateFlow()
+
+    private val _sttPipelineStatus = MutableStateFlow<String?>(null)
+    val sttPipelineStatus: StateFlow<String?> = _sttPipelineStatus.asStateFlow()
+
+    // WhatsApp Control Manager
+    val whatsAppManager = WhatsAppControlManager.instance
+    val whatsAppMessages: StateFlow<List<WhatsAppMessage>> = whatsAppManager.messages
+    val whatsAppStatus: StateFlow<String?> = whatsAppManager.lastInterceptedStatus
+
+    // Device Quick Settings & Toggle Manager
+    val deviceToggleManager = app.deviceToggleManager
+    val isFlashlightOn: StateFlow<Boolean> = deviceToggleManager.isFlashlightOn
+    val soundMode: StateFlow<com.example.toggle.SoundMode> = deviceToggleManager.soundMode
+    val isWifiEnabled: StateFlow<Boolean> = deviceToggleManager.isWifiEnabled
+    val brightnessPercent: StateFlow<Int> = deviceToggleManager.brightnessPercent
+
+    // Accessibility Service State Flows
+    val isAccessibilityConnected: StateFlow<Boolean> = com.example.accessibility.MaxAccessibilityService.isServiceConnected
+    val isAutoScrolling: StateFlow<Boolean> = com.example.accessibility.MaxAccessibilityService.isAutoScrolling
+    val autoScrollSpeedMs: StateFlow<Long> = com.example.accessibility.MaxAccessibilityService.autoScrollSpeedMs
+    val accessibilityStatus: StateFlow<String?> = com.example.accessibility.MaxAccessibilityService.lastActionStatus
+
+    // Emergency SOS & Live Location State Flows
+    val emergencySosManager = app.emergencySosManager
+    val currentLocation: StateFlow<com.example.sos.LocationData?> = emergencySosManager.currentLocation
+    val sosContacts: StateFlow<List<String>> = emergencySosManager.sosContacts
+    val isSosDispatching: StateFlow<Boolean> = emergencySosManager.isDispatching
+    val sosStatus: StateFlow<String?> = emergencySosManager.lastSosStatus
+
     // Service & Voice reactive state flows
     val isServiceRunning: StateFlow<Boolean> = MaxAssistantForegroundService.isServiceRunning
     val liveCallStatus: StateFlow<String> = MaxAssistantForegroundService.liveCallStatus
@@ -92,6 +144,14 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             viewModelScope.launch {
                 handleRecognizedVoiceCommand(cmd, raw)
             }
+        }
+
+        // Setup native STT manager callback pipeline: User Speech -> Gemini AI -> ElevenLabs TTS
+        maxSttManager.onSpeechRecognizedListener = { spokenText ->
+            processSttUserQuery(spokenText)
+        }
+        maxSttManager.onErrorListener = { errorMsg ->
+            _sttPipelineStatus.value = "STT Error: $errorMsg"
         }
     }
 
@@ -233,9 +293,63 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         _apiKeyText.value = SecureKeyManager.getApiKey(getApplication())
     }
 
+    fun validateAndSaveElevenLabsApiKey(candidateKey: String, onResult: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            _isValidatingElevenLabsKey.value = true
+            _elevenLabsValidationStatus.value = "Validating API Key with ElevenLabs server..."
+            
+            val result = elevenLabsKeyManager.validateAndSaveApiKey(candidateKey)
+            _isValidatingElevenLabsKey.value = false
+
+            when (result) {
+                is com.example.voice.ElevenLabsKeyValidationResult.Success -> {
+                    _elevenLabsApiKeyText.value = elevenLabsKeyManager.getApiKey()
+                    _elevenLabsValidationStatus.value = result.message
+                    onResult?.invoke(true, result.message)
+                }
+                is com.example.voice.ElevenLabsKeyValidationResult.Error -> {
+                    _elevenLabsValidationStatus.value = result.message
+                    onResult?.invoke(false, result.message)
+                }
+            }
+        }
+    }
+
+    fun clearElevenLabsApiKey() {
+        elevenLabsKeyManager.clearApiKey()
+        _elevenLabsApiKeyText.value = ""
+        _elevenLabsValidationStatus.value = "API key cleared."
+    }
+
     fun clearApiKey() {
         SecureKeyManager.clearCustomApiKey(getApplication())
         _apiKeyText.value = SecureKeyManager.getApiKey(getApplication())
+    }
+
+    fun testElevenLabsVoice(
+        text: String = "नमस्ते! मैं मैक्स हूँ। मैं आपकी क्या मदद कर सकता हूँ?",
+        voiceId: String = "21m00Tcm4TlvDq8ikWAM",
+        onResult: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            onResult("Generating ElevenLabs speech audio...")
+            val result = elevenLabsService.generateSpeech(
+                text = text,
+                voiceId = voiceId,
+                modelId = "eleven_multilingual_v2"
+            )
+            when (result) {
+                is com.example.voice.ElevenLabsResult.Success -> {
+                    onResult("Playing ElevenLabs audio output...")
+                    elevenLabsService.playAudio(result.audioFile) {
+                        onResult("Audio playback completed successfully!")
+                    }
+                }
+                is com.example.voice.ElevenLabsResult.Error -> {
+                    onResult("Error: ${result.message}")
+                }
+            }
+        }
     }
 
     fun clearHistory() {
@@ -252,8 +366,306 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     }
 
     /**
-     * Previews Text-To-Speech announcement for testing voice pitch, rate, and template.
+     * Starts native STT recognition for Hindi and English speech input.
      */
+    fun startSttAssistantListening(preferredLang: String = "hi-IN") {
+        audioManagerHelper.playListeningPromptBeep()
+        _sttPipelineStatus.value = "Listening for Hindi / English speech..."
+        maxSttManager.startListening(preferredLanguage = preferredLang)
+    }
+
+    /**
+     * Stops native STT recognition.
+     */
+    fun stopSttAssistantListening() {
+        maxSttManager.stopListening()
+        _sttPipelineStatus.value = "STT Stopped."
+    }
+
+    /**
+     * Processes recognized user speech: First checks hardware toggles -> fallback to Gemini AI -> ElevenLabs TTS playback.
+     */
+    fun processSttUserQuery(spokenText: String) {
+        if (spokenText.isBlank()) return
+
+        viewModelScope.launch {
+            // 1. Check for Emergency SOS & Live Location voice commands
+            val sosRes = emergencySosManager.processVoiceSosCommand(spokenText)
+            if (sosRes.isHandled) {
+                val feedback = sosRes.feedbackMessage
+                _sttPipelineStatus.value = "Emergency SOS Action: $feedback"
+
+                val currentList = _sttConversationLog.value.toMutableList()
+                currentList.add(Pair(spokenText, feedback))
+                _sttConversationLog.value = currentList
+
+                if (elevenLabsKeyManager.hasValidApiKey()) {
+                    testElevenLabsVoice(text = feedback) {}
+                } else {
+                    fallbackAndroidTts(feedback)
+                }
+                return@launch
+            }
+
+            // 2. Check for Accessibility Auto-Scroll & Auto-Type voice commands
+            val accessRes = com.example.accessibility.MaxAccessibilityService.processVoiceAccessibilityCommand(spokenText)
+            if (accessRes.isHandled) {
+                val feedback = accessRes.feedbackMessage
+                _sttPipelineStatus.value = "Accessibility Action: $feedback"
+
+                val currentList = _sttConversationLog.value.toMutableList()
+                currentList.add(Pair(spokenText, feedback))
+                _sttConversationLog.value = currentList
+
+                if (elevenLabsKeyManager.hasValidApiKey()) {
+                    testElevenLabsVoice(text = feedback) {}
+                } else {
+                    fallbackAndroidTts(feedback)
+                }
+                return@launch
+            }
+
+            // 2. Check for Quick Settings / Hardware Toggle voice commands
+            val voiceToggleRes = deviceToggleManager.processVoiceToggleCommand(spokenText)
+            if (voiceToggleRes.isHandled) {
+                val feedback = voiceToggleRes.feedbackMessage
+                _sttPipelineStatus.value = "Hardware Action: $feedback"
+
+                val currentList = _sttConversationLog.value.toMutableList()
+                currentList.add(Pair(spokenText, feedback))
+                _sttConversationLog.value = currentList
+
+                if (elevenLabsKeyManager.hasValidApiKey()) {
+                    testElevenLabsVoice(text = feedback) {}
+                } else {
+                    fallbackAndroidTts(feedback)
+                }
+                return@launch
+            }
+
+            _sttPipelineStatus.value = "User spoke: \"$spokenText\" -> Asking Gemini AI..."
+            
+            // Generate response from Gemini AI
+            val aiResult = geminiService.generateMaxVoiceResponse(
+                userQuery = spokenText,
+                settings = settings.value
+            )
+
+            when (aiResult) {
+                is com.example.ai.AiResult.Success -> {
+                    val aiReplyText = aiResult.text
+                    _sttPipelineStatus.value = "Gemini AI: \"$aiReplyText\" -> Generating ElevenLabs TTS..."
+                    
+                    // Add to conversation log
+                    val currentList = _sttConversationLog.value.toMutableList()
+                    currentList.add(Pair(spokenText, aiReplyText))
+                    _sttConversationLog.value = currentList
+
+                    // Feed into ElevenLabs TTS
+                    if (elevenLabsKeyManager.hasValidApiKey()) {
+                        val ttsResult = elevenLabsService.generateSpeech(
+                            text = aiReplyText,
+                            voiceId = "21m00Tcm4TlvDq8ikWAM"
+                        )
+                        when (ttsResult) {
+                            is com.example.voice.ElevenLabsResult.Success -> {
+                                _sttPipelineStatus.value = "Playing ElevenLabs natural voice response..."
+                                elevenLabsService.playAudio(ttsResult.audioFile) {
+                                    _sttPipelineStatus.value = "Voice interaction complete."
+                                }
+                            }
+                            is com.example.voice.ElevenLabsResult.Error -> {
+                                _sttPipelineStatus.value = "ElevenLabs Error: ${ttsResult.message}. Falling back to standard TTS..."
+                                fallbackAndroidTts(aiReplyText)
+                            }
+                        }
+                    } else {
+                        _sttPipelineStatus.value = "ElevenLabs key missing. Playing response via standard Android TTS..."
+                        fallbackAndroidTts(aiReplyText)
+                    }
+                }
+                is com.example.ai.AiResult.Error -> {
+                    val errorMsg = "Gemini AI Error: ${aiResult.message}"
+                    _sttPipelineStatus.value = errorMsg
+                    fallbackAndroidTts("Sorry, I could not generate a response right now. Please try again.")
+                }
+            }
+        }
+    }
+
+    private fun fallbackAndroidTts(text: String) {
+        audioManagerHelper.requestVoiceAssistantAudioFocus()
+        announcer.announceCaller(
+            callerNameOrNumber = text,
+            template = "{name}",
+            speechRate = settings.value.ttsSpeechRate,
+            speechPitch = settings.value.ttsPitch,
+            repeatCount = 1,
+            onDone = {
+                audioManagerHelper.releaseVoiceAssistantAudioFocus()
+            }
+        )
+    }
+
+    // WhatsApp Mobile Control Methods
+    fun isNotificationListenerGranted(): Boolean {
+        return WhatsAppControlManager.isNotificationListenerGranted(getApplication())
+    }
+
+    fun openNotificationListenerSettings(context: android.content.Context) {
+        val intent = android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    }
+
+    fun readAloudWhatsAppMessage(msg: WhatsAppMessage) {
+        whatsAppManager.readAloudMessage(
+            message = msg,
+            elevenLabsService = elevenLabsService,
+            elevenLabsKeyManager = elevenLabsKeyManager,
+            announcer = announcer,
+            scope = viewModelScope
+        ) { status ->
+            _sttPipelineStatus.value = status
+        }
+    }
+
+    fun sendWhatsAppReply(messageId: String, replyText: String) {
+        val success = whatsAppManager.sendRemoteInputReply(
+            context = getApplication(),
+            messageId = messageId,
+            replyText = replyText
+        )
+        if (success) {
+            val status = "Reply sent to WhatsApp: \"$replyText\""
+            _sttPipelineStatus.value = status
+            if (elevenLabsKeyManager.hasValidApiKey()) {
+                testElevenLabsVoice(text = "WhatsApp reply sent successfully.") {}
+            } else {
+                fallbackAndroidTts("WhatsApp reply sent successfully.")
+            }
+        }
+    }
+
+    fun startDictatingWhatsAppReply(messageId: String, preferredLang: String = "hi-IN") {
+        val targetMsg = whatsAppMessages.value.find { it.id == messageId } ?: return
+        audioManagerHelper.playListeningPromptBeep()
+        _sttPipelineStatus.value = "Dictating WhatsApp reply to ${targetMsg.sender}..."
+
+        maxSttManager.onSpeechRecognizedListener = { spokenText ->
+            sendWhatsAppReply(messageId, spokenText)
+            // Restore default STT handler
+            maxSttManager.onSpeechRecognizedListener = { text -> processSttUserQuery(text) }
+        }
+        maxSttManager.startListening(preferredLanguage = preferredLang)
+    }
+
+    fun generateAiWhatsAppReplyAndSend(messageId: String) {
+        val targetMsg = whatsAppMessages.value.find { it.id == messageId } ?: return
+        viewModelScope.launch {
+            _sttPipelineStatus.value = "Generating AI response for ${targetMsg.sender}..."
+            val aiResult = geminiService.generateSmsReply(
+                senderNumber = targetMsg.sender,
+                incomingMessage = targetMsg.text,
+                settings = settings.value
+            )
+            when (aiResult) {
+                is AiResult.Success -> {
+                    sendWhatsAppReply(messageId, aiResult.text)
+                }
+                is AiResult.Error -> {
+                    _sttPipelineStatus.value = "AI WhatsApp Reply Error: ${aiResult.message}"
+                }
+            }
+        }
+    }
+
+    // Hardware Toggle Control Methods
+    fun toggleFlashlight(enable: Boolean) {
+        val result = deviceToggleManager.setFlashlightEnabled(enable)
+        val msg = if (result is com.example.toggle.ToggleResult.Success) result.message else (result as com.example.toggle.ToggleResult.Error).message
+        _sttPipelineStatus.value = msg
+    }
+
+    fun setSoundMode(mode: com.example.toggle.SoundMode) {
+        val result = deviceToggleManager.setSoundMode(mode)
+        val msg = if (result is com.example.toggle.ToggleResult.Success) result.message else (result as com.example.toggle.ToggleResult.Error).message
+        _sttPipelineStatus.value = msg
+    }
+
+    fun toggleWifi(enable: Boolean) {
+        val result = deviceToggleManager.setWifiEnabled(enable)
+        val msg = if (result is com.example.toggle.ToggleResult.Success) result.message else (result as com.example.toggle.ToggleResult.Error).message
+        _sttPipelineStatus.value = msg
+    }
+
+    fun setScreenBrightness(percent: Int) {
+        val result = deviceToggleManager.setScreenBrightness(percent)
+        val msg = if (result is com.example.toggle.ToggleResult.Success) result.message else (result as com.example.toggle.ToggleResult.Error).message
+        _sttPipelineStatus.value = msg
+    }
+
+    fun canWriteSystemSettings(): Boolean {
+        return deviceToggleManager.canWriteSystemSettings()
+    }
+
+    fun openWriteSettingsPermission(context: android.content.Context) {
+        deviceToggleManager.openWriteSettingsPermission(context)
+    }
+
+    // Accessibility Control Methods
+    fun performScrollDown() {
+        val service = com.example.accessibility.MaxAccessibilityService.instance
+        if (service != null) {
+            service.performScrollDown()
+        } else {
+            _sttPipelineStatus.value = "Accessibility service is not enabled."
+        }
+    }
+
+    fun performScrollUp() {
+        val service = com.example.accessibility.MaxAccessibilityService.instance
+        if (service != null) {
+            service.performScrollUp()
+        } else {
+            _sttPipelineStatus.value = "Accessibility service is not enabled."
+        }
+    }
+
+    fun startAutoScroll(intervalMs: Long = 2000L) {
+        val service = com.example.accessibility.MaxAccessibilityService.instance
+        if (service != null) {
+            service.startAutoScroll(intervalMs)
+        } else {
+            _sttPipelineStatus.value = "Accessibility service is not enabled."
+        }
+    }
+
+    fun stopAutoScroll() {
+        val service = com.example.accessibility.MaxAccessibilityService.instance
+        if (service != null) {
+            service.stopAutoScroll()
+        } else {
+            _sttPipelineStatus.value = "Accessibility service is not enabled."
+        }
+    }
+
+    fun autoTypeInFocusedField(textToType: String) {
+        val service = com.example.accessibility.MaxAccessibilityService.instance
+        if (service != null) {
+            service.autoTypeInFocusedField(textToType)
+        } else {
+            _sttPipelineStatus.value = "Accessibility service is not enabled."
+        }
+    }
+
+    fun openAccessibilitySettings(context: android.content.Context) {
+        val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    }
     fun testTtsVoice(sampleName: String = "John Doe") {
         val s = settings.value
         audioManagerHelper.requestVoiceAssistantAudioFocus()
@@ -607,5 +1019,22 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 }
             }
         }
+    }
+
+    // Emergency SOS & Location Helpers
+    fun fetchCurrentLocation() {
+        emergencySosManager.fetchCurrentLocation()
+    }
+
+    fun dispatchSosAlert(customNote: String = "") {
+        emergencySosManager.dispatchSosAlert(customNote)
+    }
+
+    fun addSosContact(number: String) {
+        emergencySosManager.addSosContact(number)
+    }
+
+    fun removeSosContact(number: String) {
+        emergencySosManager.removeSosContact(number)
     }
 }

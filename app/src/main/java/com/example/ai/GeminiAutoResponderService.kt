@@ -45,7 +45,7 @@ class GeminiAutoResponderService(private val context: Context) {
         }
 
         val prompt = buildString {
-            appendLine("You are an automated SMS assistant responding on behalf of the device owner.")
+            appendLine("You are MAX, an intelligent and helpful AI assistant responding on behalf of the device owner.")
             appendLine("Owner Current Persona: ${settings.selectedPersona}")
             appendLine("Owner Context/Instructions: ${settings.customInstructions}")
             appendLine("Desired Tone: ${settings.responseTone}")
@@ -53,25 +53,28 @@ class GeminiAutoResponderService(private val context: Context) {
             appendLine("Incoming Message: \"$incomingMessage\"")
             appendLine()
             appendLine("TASK:")
-            appendLine("Write a concise, natural, context-aware SMS reply to this incoming message.")
-            appendLine("RULES:")
-            appendLine("1. Keep it short (maximum 160 characters if possible).")
-            appendLine("2. Address the sender's message politely according to the owner's status.")
-            appendLine("3. Output ONLY the reply text directly. Do not include quotes, prefixes, or explanations.")
+            appendLine("Write a concise, natural, context-aware reply to this incoming message.")
+            appendLine("SYSTEM RULES:")
+            appendLine("1. Keep all responses concise, direct, and conversational (1-3 sentences max).")
+            appendLine("2. Format text specifically for Text-to-Speech engines: avoid complex Markdown, bullet points, code blocks, or special symbols.")
+            appendLine("3. Speak naturally in clear, engaging Hindi or English based on user input.")
+            appendLine("4. Avoid unnecessary fillers or polite intros; provide answers immediately.")
+            appendLine("5. Keep it short (maximum 160 characters if possible).")
+            appendLine("6. Output ONLY the reply text directly. Do not include quotes, prefixes, or explanations.")
         }
 
         executeGeminiRequest(prompt, settings.modelName)
     }
 
     /**
-     * Generates a context-aware SMS notification reply for a missed phone call.
+     * Generates a context-aware notification reply for a missed phone call.
      */
     suspend fun generateMissedCallReply(
         callerNumber: String,
         settings: AppSettings
     ): AiResult = withContext(Dispatchers.IO) {
         val prompt = buildString {
-            appendLine("You are an automated SMS assistant responding to a missed phone call on behalf of the device owner.")
+            appendLine("You are MAX, an intelligent and helpful AI assistant responding to a missed phone call on behalf of the device owner.")
             appendLine("Owner Current Persona: ${settings.selectedPersona}")
             appendLine("Owner Context/Instructions: ${settings.customInstructions}")
             appendLine("Desired Tone: ${settings.responseTone}")
@@ -79,10 +82,39 @@ class GeminiAutoResponderService(private val context: Context) {
             appendLine()
             appendLine("TASK:")
             appendLine("Write a polite, concise SMS notification to the caller explaining that their call was missed.")
-            appendLine("RULES:")
-            appendLine("1. Keep it very short and helpful (under 140 characters).")
-            appendLine("2. Mention that the owner missed their call and will return it or ask them to leave a message.")
-            appendLine("3. Output ONLY the reply text directly. Do not include quotes, prefixes, or explanations.")
+            appendLine("SYSTEM RULES:")
+            appendLine("1. Keep all responses concise, direct, and conversational (1-3 sentences max).")
+            appendLine("2. Format text specifically for Text-to-Speech engines: avoid complex Markdown, bullet points, code blocks, or special symbols.")
+            appendLine("3. Speak naturally in clear, engaging Hindi or English based on user input.")
+            appendLine("4. Avoid unnecessary fillers or polite intros; provide answers immediately.")
+            appendLine("5. Keep it very short and helpful (under 140 characters).")
+            appendLine("6. Output ONLY the reply text directly. Do not include quotes, prefixes, or explanations.")
+        }
+
+        executeGeminiRequest(prompt, settings.modelName)
+    }
+
+    /**
+     * Generates a direct response from MAX AI assistant for direct voice query / interaction.
+     */
+    suspend fun generateMaxVoiceResponse(
+        userQuery: String,
+        settings: AppSettings
+    ): AiResult = withContext(Dispatchers.IO) {
+        if (userQuery.isBlank()) {
+            return@withContext AiResult.Error("Query is empty.")
+        }
+
+        val prompt = buildString {
+            appendLine("You are MAX, an intelligent and helpful AI assistant.")
+            appendLine("User Query: \"$userQuery\"")
+            appendLine()
+            appendLine("SYSTEM RULES:")
+            appendLine("1. Keep all responses concise, direct, and conversational (1-3 sentences max).")
+            appendLine("2. Format text specifically for Text-to-Speech engines: avoid complex Markdown, bullet points, code blocks, or special symbols.")
+            appendLine("3. Speak naturally in clear, engaging Hindi or English based on user input.")
+            appendLine("4. Avoid unnecessary fillers or polite intros; provide answers immediately.")
+            appendLine("5. Output ONLY the response text directly.")
         }
 
         executeGeminiRequest(prompt, settings.modelName)

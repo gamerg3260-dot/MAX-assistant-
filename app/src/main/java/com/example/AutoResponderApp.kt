@@ -36,6 +36,21 @@ class AutoResponderApp : Application() {
     lateinit var audioManagerHelper: CallVoiceAudioManager
         private set
 
+    lateinit var elevenLabsTtsService: com.example.voice.ElevenLabsTtsService
+        private set
+
+    lateinit var elevenLabsKeyManager: com.example.voice.ElevenLabsKeyManager
+        private set
+
+    lateinit var maxSttManager: com.example.voice.MaxSttManager
+        private set
+
+    lateinit var deviceToggleManager: com.example.toggle.DeviceToggleManager
+        private set
+
+    lateinit var emergencySosManager: com.example.sos.EmergencySosManager
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -47,6 +62,11 @@ class AutoResponderApp : Application() {
         callAnnouncer = CallAnnouncer(this)
         voiceCommandDetector = VoiceCommandDetector(this)
         audioManagerHelper = CallVoiceAudioManager(this)
+        elevenLabsKeyManager = com.example.voice.ElevenLabsKeyManager(this)
+        elevenLabsTtsService = com.example.voice.ElevenLabsTtsService(this)
+        maxSttManager = com.example.voice.MaxSttManager(this)
+        deviceToggleManager = com.example.toggle.DeviceToggleManager(this)
+        emergencySosManager = com.example.sos.EmergencySosManager.getInstance(this)
     }
 
     companion object {

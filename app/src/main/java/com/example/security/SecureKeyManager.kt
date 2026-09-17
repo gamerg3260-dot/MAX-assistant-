@@ -15,6 +15,7 @@ object SecureKeyManager {
     private const val TAG = "SecureKeyManager"
     private const val PREFS_FILE = "secure_gemini_prefs"
     private const val KEY_GEMINI_API_KEY = "encrypted_gemini_api_key"
+    private const val KEY_ELEVENLABS_API_KEY = "encrypted_elevenlabs_api_key"
 
     private fun getEncryptedPrefs(context: Context): SharedPreferences? {
         return try {
@@ -71,6 +72,21 @@ object SecureKeyManager {
      */
     fun clearCustomApiKey(context: Context) {
         getEncryptedPrefs(context)?.edit()?.remove(KEY_GEMINI_API_KEY)?.apply()
+    }
+
+    /**
+     * Securely retrieves the active ElevenLabs API Key.
+     */
+    fun getElevenLabsApiKey(context: Context): String {
+        val storedKey = getEncryptedPrefs(context)?.getString(KEY_ELEVENLABS_API_KEY, null)?.trim()
+        return storedKey ?: ""
+    }
+
+    /**
+     * Securely stores an updated ElevenLabs API Key into EncryptedSharedPreferences.
+     */
+    fun saveElevenLabsApiKey(context: Context, apiKey: String) {
+        getEncryptedPrefs(context)?.edit()?.putString(KEY_ELEVENLABS_API_KEY, apiKey.trim())?.apply()
     }
 
     /**
