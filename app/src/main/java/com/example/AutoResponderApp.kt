@@ -54,6 +54,9 @@ class AutoResponderApp : Application() {
     lateinit var maxCameraManager: com.example.camera.MaxCameraManager
         private set
 
+    lateinit var voskWakeWordDetector: com.example.voice.VoskWakeWordDetector
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -71,6 +74,7 @@ class AutoResponderApp : Application() {
         deviceToggleManager = com.example.toggle.DeviceToggleManager(this)
         emergencySosManager = com.example.sos.EmergencySosManager.getInstance(this)
         maxCameraManager = com.example.camera.MaxCameraManager.getInstance(this)
+        voskWakeWordDetector = com.example.voice.VoskWakeWordDetector(this)
     }
 
     companion object {

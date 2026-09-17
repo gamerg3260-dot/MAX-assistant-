@@ -306,6 +306,10 @@ class MaxOverlayService : Service() {
         val elevenLabs = app.elevenLabsTtsService
         val elevenLabsKey = app.elevenLabsKeyManager
         val announcer = app.callAnnouncer
+        val vosk = app.voskWakeWordDetector
+
+        // Pause Vosk continuous wake-word detector so mic isn't contested
+        vosk.pauseListening()
 
         _isListening.value = true
         _isProcessing.value = false
@@ -335,21 +339,27 @@ class MaxOverlayService : Service() {
                                 is com.example.voice.ElevenLabsResult.Success -> {
                                     elevenLabs.playAudio(audioRes.audioFile) {
                                         _isSpeaking.value = false
-                                        _overlayStatus.value = "Tap mic to speak with MAX"
+                                        _overlayStatus.value = "Tap mic or say 'Hey Max'"
+                                        vosk.resumeListening()
                                     }
                                 }
                                 is com.example.voice.ElevenLabsResult.Error -> {
-                                    speakWithAndroidTts(reply, announcer)
+                                    speakWithAndroidTts(reply, announcer) {
+                                        vosk.resumeListening()
+                                    }
                                 }
                             }
                         } else {
-                            speakWithAndroidTts(reply, announcer)
+                            speakWithAndroidTts(reply, announcer) {
+                                vosk.resumeListening()
+                            }
                         }
                     }
                     is AiResult.Error -> {
                         val err = "Gemini AI: ${result.message}"
                         _overlayStatus.value = err
                         _isSpeaking.value = false
+                        vosk.resumeListening()
                     }
                 }
             }
@@ -359,6 +369,7 @@ class MaxOverlayService : Service() {
             _isListening.value = false
             _isProcessing.value = false
             _overlayStatus.value = "Speech recognition: $errorMsg"
+            vosk.resumeListening()
         }
 
         serviceScope.launch {
@@ -370,7 +381,7 @@ class MaxOverlayService : Service() {
         stt.startListening(preferredLanguage = "hi-IN")
     }
 
-    private fun speakWithAndroidTts(text: String, announcer: com.example.voice.CallAnnouncer) {
+    private fun speakWithAndroidTts(text: String, announcer: com.example.voice.CallAnnouncer, onComplete: (() -> Unit)? = null) {
         _isSpeaking.value = true
         announcer.announceCaller(
             callerNameOrNumber = text,
@@ -378,7 +389,8 @@ class MaxOverlayService : Service() {
             repeatCount = 1,
             onDone = {
                 _isSpeaking.value = false
-                _overlayStatus.value = "Tap mic to speak with MAX"
+                _overlayStatus.value = "Tap mic or say 'Hey Max'"
+                onComplete?.invoke()
             }
         )
     }

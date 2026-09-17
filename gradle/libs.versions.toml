@@ -43,9 +43,11 @@ credentials = "1.5.0"
 googleid = "1.1.1"
 googleGenai = "0.1.1"
 securityCrypto = "1.1.0-alpha06"
+vosk = "0.3.47"
 
 
 [libraries]
+vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
 google-genai = { group = "com.google.genai", name = "google-genai", version.ref = "googleGenai" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

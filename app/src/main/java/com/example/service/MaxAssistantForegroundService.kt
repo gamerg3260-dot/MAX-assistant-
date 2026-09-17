@@ -52,6 +52,7 @@ class MaxAssistantForegroundService : Service() {
     private lateinit var announcer: CallAnnouncer
     private lateinit var voiceDetector: VoiceCommandDetector
     private lateinit var audioManagerHelper: CallVoiceAudioManager
+    private var voskDetector: com.example.voice.VoskWakeWordDetector? = null
 
     private var currentRingingNumber: String? = null
     private var isCallHandled = false
@@ -65,10 +66,41 @@ class MaxAssistantForegroundService : Service() {
         announcer = CallAnnouncer(this)
         voiceDetector = VoiceCommandDetector(this)
         audioManagerHelper = CallVoiceAudioManager(this)
+        voskDetector = (application as? AutoResponderApp)?.voskWakeWordDetector
 
         createNotificationChannel()
         setupVoiceCommandCallbacks()
+        setupWakeWordCallbacks()
         registerCallStateListener()
+        startContinuousWakeWordListening()
+    }
+
+    private fun setupWakeWordCallbacks() {
+        voskDetector?.onWakeWordDetected = { wakePhrase ->
+            Log.i(TAG, "Wake word '$wakePhrase' triggered from background!")
+            _liveVoiceState.value = "Wake word detected: $wakePhrase"
+            
+            // Check microphone permission before showing overlay
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                // Trigger Siri-Style floating overlay & start listening
+                com.example.overlay.MaxOverlayService.startListening(this)
+            } else {
+                Log.w(TAG, "Cannot launch voice prompt: RECORD_AUDIO permission missing")
+            }
+        }
+
+        voskDetector?.onError = { err ->
+            Log.w(TAG, "Vosk background detector warning: $err")
+        }
+    }
+
+    private fun startContinuousWakeWordListening() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            Log.i(TAG, "Starting continuous background Vosk wake-word listener ('Hey Max')...")
+            voskDetector?.startListening()
+        } else {
+            Log.w(TAG, "RECORD_AUDIO not granted. Background wake-word detection postponed.")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

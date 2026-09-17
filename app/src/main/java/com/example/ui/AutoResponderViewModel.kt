@@ -179,6 +179,11 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val lastCapturedVideoUri: StateFlow<android.net.Uri?> = maxCameraManager.lastCapturedVideoUri
     val cameraStatus: StateFlow<String?> = maxCameraManager.cameraStatus
 
+    // Vosk Offline Wake-Word ("Hey Max") State Flows
+    val voskWakeWordDetector = app.voskWakeWordDetector
+    val wakeWordState = voskWakeWordDetector.state
+    val wakeWordRmsDb = voskWakeWordDetector.rmsDbLevel
+
     // Service & Voice reactive state flows
     val isServiceRunning: StateFlow<Boolean> = MaxAssistantForegroundService.isServiceRunning
     val liveCallStatus: StateFlow<String> = MaxAssistantForegroundService.liveCallStatus
@@ -469,6 +474,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             _sttPipelineStatus.value = "RECORD_AUDIO permission missing. Please grant microphone access."
             return
         }
+        voskWakeWordDetector.pauseListening()
         _isVoiceOrbActive.value = true
         _isVoiceOrbListening.value = true
         _isVoiceOrbSpeaking.value = false
@@ -484,6 +490,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         maxSttManager.stopListening()
         elevenLabsService.stopAudio()
         announcer.stop()
+        voskWakeWordDetector.resumeListening()
         _voiceOrbStatus.value = "Tap MAX Voice Orb to speak"
     }
 
@@ -703,6 +710,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                                     _isVoiceOrbActive.value = false
                                     _voiceOrbStatus.value = "Tap mic to speak with MAX"
                                     _sttPipelineStatus.value = "Voice interaction complete."
+                                    voskWakeWordDetector.resumeListening()
                                 }
                             }
                             is com.example.voice.ElevenLabsResult.Error -> {
@@ -745,6 +753,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 _isVoiceOrbSpeaking.value = false
                 _isVoiceOrbActive.value = false
                 _voiceOrbStatus.value = "Tap MAX Voice Orb to speak"
+                voskWakeWordDetector.resumeListening()
                 onDone?.invoke()
             }
         )
