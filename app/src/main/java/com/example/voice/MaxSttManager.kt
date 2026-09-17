@@ -108,12 +108,25 @@ class MaxSttManager(private val context: Context) {
         override fun onEvent(eventType: Int, params: Bundle?) {}
     }
 
+    private fun destroySpeechRecognizerInternal() {
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
+        } catch (e: Exception) {
+            Log.w(tag, "Error destroying previous SpeechRecognizer instance: ${e.message}")
+        } finally {
+            speechRecognizer = null
+            isListening = false
+        }
+    }
+
     /**
      * Starts native speech recognition supporting Hindi (hi-IN) and English (en-US).
      */
     fun startListening(preferredLanguage: String = "hi-IN") {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            val error = "RECORD_AUDIO permission missing. Please grant microphone access."
+            val error = "Microphone permission (RECORD_AUDIO) missing. Please grant permission in app settings."
             Log.e(tag, error)
             _sttState.value = MaxSttState.Error(error)
             onErrorListener?.invoke(error)
@@ -122,7 +135,7 @@ class MaxSttManager(private val context: Context) {
 
         mainHandler.post {
             try {
-                stopListening()
+                destroySpeechRecognizerInternal()
 
                 if (!SpeechRecognizer.isRecognitionAvailable(context)) {
                     val error = "Speech recognition service is not available on this device."
@@ -132,9 +145,14 @@ class MaxSttManager(private val context: Context) {
                     return@post
                 }
 
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                _partialText.value = ""
+                _sttState.value = MaxSttState.Listening("Listening for Hindi / English speech...")
+                isListening = true
+
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
                     setRecognitionListener(recognitionListener)
                 }
+                speechRecognizer = recognizer
 
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -143,21 +161,15 @@ class MaxSttManager(private val context: Context) {
                     putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("hi-IN", "en-US", "en-IN"))
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                    // Enable offline model flags (Vosk / on-device speech recognition)
-                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                    putExtra("android.speech.extra.PREFER_OFFLINE", true)
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                 }
 
-                _sttState.value = MaxSttState.Preparing
-                _partialText.value = ""
-                isListening = true
-                speechRecognizer?.startListening(intent)
-                Log.d(tag, "SpeechRecognizer started listening with language $preferredLanguage...")
+                recognizer.startListening(intent)
+                Log.d(tag, "SpeechRecognizer started listening immediately with language $preferredLanguage...")
             } catch (e: Exception) {
-                Log.e(tag, "Failed to initialize SpeechRecognizer: ${e.message}", e)
-                isListening = false
+                Log.e(tag, "Failed to start SpeechRecognizer: ${e.message}", e)
+                destroySpeechRecognizerInternal()
                 val errorMsg = "Speech recognition start failed: ${e.localizedMessage}"
                 _sttState.value = MaxSttState.Error(errorMsg)
                 onErrorListener?.invoke(errorMsg)
@@ -170,19 +182,10 @@ class MaxSttManager(private val context: Context) {
      */
     fun stopListening() {
         mainHandler.post {
-            try {
-                if (isListening || speechRecognizer != null) {
-                    speechRecognizer?.stopListening()
-                    speechRecognizer?.cancel()
-                    speechRecognizer?.destroy()
-                    speechRecognizer = null
-                    isListening = false
-                    _rmsDbLevel.value = 0f
-                    Log.d(tag, "SpeechRecognizer stopped and resources released")
-                }
-            } catch (e: Exception) {
-                Log.e(tag, "Error stopping SpeechRecognizer: ${e.message}")
-            }
+            destroySpeechRecognizerInternal()
+            _sttState.value = MaxSttState.Idle
+            _rmsDbLevel.value = 0f
+            Log.d(tag, "SpeechRecognizer stopped and resources released")
         }
     }
 

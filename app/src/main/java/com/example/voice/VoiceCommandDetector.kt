@@ -155,14 +155,28 @@ class VoiceCommandDetector(private val context: Context) {
         return VoiceCommand.UNKNOWN
     }
 
+    private fun destroySpeechRecognizerInternal() {
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
+        } catch (e: Exception) {
+            Log.w(tag, "Error destroying speechRecognizer instance: ${e.message}")
+        } finally {
+            speechRecognizer = null
+            isCurrentlyListening = false
+        }
+    }
+
     fun startListening(
         timeoutSeconds: Int = 12,
         customAcceptKeywords: String? = null,
         customRejectKeywords: String? = null
     ) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            _detectorState.value = VoiceDetectorState.Error("RECORD_AUDIO permission missing")
-            onErrorListener?.invoke("RECORD_AUDIO permission missing")
+            val errorMsg = "Microphone permission (RECORD_AUDIO) missing. Please grant microphone access."
+            _detectorState.value = VoiceDetectorState.Error(errorMsg)
+            onErrorListener?.invoke(errorMsg)
             return
         }
 
@@ -175,17 +189,21 @@ class VoiceCommandDetector(private val context: Context) {
 
         mainHandler.post {
             try {
-                stopListening()
+                destroySpeechRecognizerInternal()
 
                 if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-                    _detectorState.value = VoiceDetectorState.Error("Speech recognition not available on device")
-                    onErrorListener?.invoke("Speech recognition not available on device")
+                    _detectorState.value = VoiceDetectorState.Error("Speech recognition service is not available on device")
+                    onErrorListener?.invoke("Speech recognition service is not available on device")
                     return@post
                 }
 
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                _detectorState.value = VoiceDetectorState.Listening("Say 'Accept' or 'Reject'...")
+                isCurrentlyListening = true
+
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
                     setRecognitionListener(recognitionListener)
                 }
+                speechRecognizer = recognizer
 
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -196,13 +214,11 @@ class VoiceCommandDetector(private val context: Context) {
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, (timeoutSeconds * 1000).toLong())
                 }
 
-                _detectorState.value = VoiceDetectorState.Preparing
-                isCurrentlyListening = true
-                speechRecognizer?.startListening(intent)
-                Log.d(tag, "SpeechRecognizer started listening...")
+                recognizer.startListening(intent)
+                Log.d(tag, "SpeechRecognizer started listening immediately...")
             } catch (e: Exception) {
                 Log.e(tag, "Error launching SpeechRecognizer: ${e.message}", e)
-                isCurrentlyListening = false
+                destroySpeechRecognizerInternal()
                 _detectorState.value = VoiceDetectorState.Error("Failed to start voice recognition: ${e.localizedMessage}")
                 onErrorListener?.invoke("Failed to start voice recognition: ${e.message}")
             }
@@ -211,19 +227,10 @@ class VoiceCommandDetector(private val context: Context) {
 
     fun stopListening() {
         mainHandler.post {
-            try {
-                if (isCurrentlyListening || speechRecognizer != null) {
-                    speechRecognizer?.stopListening()
-                    speechRecognizer?.cancel()
-                    speechRecognizer?.destroy()
-                    speechRecognizer = null
-                    isCurrentlyListening = false
-                    _rmsDbLevel.value = 0f
-                    Log.d(tag, "SpeechRecognizer stopped and cleaned up")
-                }
-            } catch (e: Exception) {
-                Log.e(tag, "Error during stopListening: ${e.message}")
-            }
+            destroySpeechRecognizerInternal()
+            _detectorState.value = VoiceDetectorState.Idle
+            _rmsDbLevel.value = 0f
+            Log.d(tag, "SpeechRecognizer stopped and cleaned up")
         }
     }
 
