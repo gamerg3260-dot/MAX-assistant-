@@ -1,4 +1,4 @@
-name: Setup Vosk Model and Build APK
+name: Build Debug APK
 
 on:
   push:
@@ -33,7 +33,6 @@ jobs:
           mkdir -p app/src/main/assets
           cd app/src/main/assets
           if [ ! -d "model-en" ]; then
-            echo "Downloading Vosk model..."
             curl -L -O https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
             unzip vosk-model-small-en-us-0.15.zip
             mv vosk-model-small-en-us-0.15 model-en
