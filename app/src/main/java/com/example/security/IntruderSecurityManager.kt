@@ -175,6 +175,15 @@ class IntruderSecurityManager private constructor(private val context: Context) 
                     return@launch
                 }
 
+                if (androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        android.Manifest.permission.CAMERA
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    Log.e(tag, "Camera permission missing for silent background capture. Skipping capture.")
+                    return@launch
+                }
+
                 startCameraThread()
 
                 val imageReader = ImageReader.newInstance(1280, 720, ImageFormat.JPEG, 2)
