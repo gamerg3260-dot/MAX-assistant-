@@ -117,7 +117,8 @@ class DeviceToggleManager(private val context: Context) {
     }
 
     /**
-     * Toggles device Sound Mode: Normal, Vibrate, or Silent.
+     * Toggles device Sound Mode: Normal, Vibrate, or Silent using AudioManager.
+     * Ensures Silent mode sets ringerMode to SILENT without triggering Do Not Disturb or Night Mode.
      */
     fun setSoundMode(mode: SoundMode): ToggleResult {
         if (audioManager == null) return ToggleResult.Error("AudioManager is unavailable.")
@@ -128,20 +129,26 @@ class DeviceToggleManager(private val context: Context) {
                 notificationManager?.isNotificationPolicyAccessGranted == true
             } else true
 
-            if ((mode == SoundMode.SILENT || mode == SoundMode.VIBRATE) && !isDndGranted) {
+            if ((mode == SoundMode.SILENT || mode == SoundMode.VIBRATE) && !isDndGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 return ToggleResult.Error(
-                    message = "Changing sound modes requires Do Not Disturb access in settings.",
+                    message = "Changing sound modes requires Do Not Disturb policy access in settings.",
                     requiresPermissionIntent = intent
                 )
             }
 
             when (mode) {
-                SoundMode.NORMAL -> audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
-                SoundMode.VIBRATE -> audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
-                SoundMode.SILENT -> audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                SoundMode.NORMAL -> {
+                    audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                }
+                SoundMode.VIBRATE -> {
+                    audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                }
+                SoundMode.SILENT -> {
+                    audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                }
             }
             _soundMode.value = mode
             val msg = "Sound mode set to ${mode.name.lowercase().replaceFirstChar { it.uppercase() }}"
@@ -154,17 +161,27 @@ class DeviceToggleManager(private val context: Context) {
     }
 
     /**
-     * Toggles Wi-Fi state or opens Wi-Fi settings panel.
+     * Toggles Wi-Fi state using WifiManager or launches Wi-Fi Control Panel Intent (Android 10+).
      */
     fun setWifiEnabled(enabled: Boolean): ToggleResult {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Android 10+ restricts direct programmatic Wi-Fi toggling; launch Wi-Fi Panel Intent
-                val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                // Android 10+ restricts direct programmatic Wi-Fi toggling for apps. Launch Wi-Fi Control Panel Intent.
+                val panelIntent = Intent(Settings.Panel.ACTION_WIFI).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                _isWifiEnabled.value = enabled
-                ToggleResult.Success("Opening Wi-Fi settings panel to toggle Wi-Fi.")
+                try {
+                    context.startActivity(panelIntent)
+                    _isWifiEnabled.value = enabled
+                    ToggleResult.Success("Opening floating Wi-Fi panel to toggle Wi-Fi.")
+                } catch (panelEx: Exception) {
+                    val fallbackIntent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(fallbackIntent)
+                    _isWifiEnabled.value = enabled
+                    ToggleResult.Success("Opening Wi-Fi settings to toggle Wi-Fi.")
+                }
             } else {
                 @Suppress("DEPRECATION")
                 val success = wifiManager?.setWifiEnabled(enabled) ?: false
