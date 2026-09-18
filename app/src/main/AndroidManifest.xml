@@ -83,6 +83,16 @@
             </intent-filter>
         </service>
 
+        <!-- Telecom InCallService Integration -->
+        <service
+            android:name=".telephony.MaxInCallService"
+            android:permission="android.permission.BIND_INCALL_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>
+
         <!-- MAX Accessibility Auto-Scroll & Auto-Type Service -->
         <service
             android:name=".accessibility.MaxAccessibilityService"

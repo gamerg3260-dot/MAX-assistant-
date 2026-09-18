@@ -26,9 +26,16 @@ class CallController(private val context: Context) {
 
     /**
      * Accepts the currently ringing incoming phone call.
-     * Uses TelecomManager.acceptRingingCall() on Android 8.0+ (API 26+).
+     * Uses InCallService and TelecomManager.acceptRingingCall() on Android 8.0+ (API 26+).
      */
     fun acceptRingingCall(): CallActionResult {
+        // 1. Attempt programmatic answer via active InCallService Call instance
+        if (MaxInCallService.answerCurrentCall()) {
+            Log.i(tag, "Call accepted via InCallService Telecom API.")
+            return CallActionResult.Success("Call accepted via Telecom InCallService.")
+        }
+
+        // 2. Fallback to TelecomManager.acceptRingingCall()
         if (ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.ANSWER_PHONE_CALLS
@@ -62,9 +69,16 @@ class CallController(private val context: Context) {
 
     /**
      * Ends or rejects the currently ringing or active phone call.
-     * Uses TelecomManager.endCall() on Android 9.0+ (API 28+).
+     * Uses InCallService and TelecomManager.endCall() on Android 9.0+ (API 28+).
      */
     fun endCall(): CallActionResult {
+        // 1. Attempt programmatic rejection/end via active InCallService Call instance
+        if (MaxInCallService.rejectCurrentCall()) {
+            Log.i(tag, "Call rejected/ended via InCallService Telecom API.")
+            return CallActionResult.Success("Call rejected via Telecom InCallService.")
+        }
+
+        // 2. Fallback to TelecomManager.endCall()
         if (ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.ANSWER_PHONE_CALLS
