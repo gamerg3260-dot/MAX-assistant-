@@ -849,7 +849,7 @@ fun VoiceCallAnnouncerTab(
                             Icon(imageVector = Icons.Default.RecordVoiceOver, contentDescription = null, tint = theme.primaryAccent)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "ElevenLabs Multilingual TTS Engine",
+                                text = "Swara Native Voice TTS Engine",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -885,9 +885,8 @@ fun VoiceCallAnnouncerTab(
 
                     Button(
                         onClick = {
-                            viewModel.testElevenLabsVoice(
-                                text = sampleText,
-                                voiceId = "21m00Tcm4TlvDq8ikWAM"
+                            viewModel.testSwaraVoice(
+                                text = sampleText
                             ) { status ->
                                 ttsResultStatus = status
                             }
@@ -896,11 +895,11 @@ fun VoiceCallAnnouncerTab(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("generate_elevenlabs_tts_btn")
+                            .testTag("test_swara_tts_btn")
                     ) {
-                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Play ElevenLabs Audio", tint = Color.Black)
+                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Play Swara Voice", tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Generate & Play ElevenLabs TTS", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Play Swara Native Voice TTS", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1432,6 +1431,132 @@ fun HardwareSystemControlTab(
                         Icon(imageVector = Icons.Default.Send, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Execute Spoken Toggle Command", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        // Application Launcher & Intent Control Card
+        item {
+            var appLaunchTestQuery by remember { mutableStateOf("Open YouTube") }
+            var appLaunchFeedback by remember { mutableStateOf<String?>(null) }
+
+            SiriGlassCard(theme = theme) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.OpenInNew, contentDescription = null, tint = theme.primaryAccent)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("App Launcher & Intent Control", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Open installed Android applications immediately using PackageManager & explicit Intents.",
+                        fontSize = 11.sp,
+                        color = Color.LightGray
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("Quick App Launcher Presets:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    val quickApps = listOf(
+                        Pair("YouTube", "youtube"),
+                        Pair("WhatsApp", "whatsapp"),
+                        Pair("Chrome", "chrome"),
+                        Pair("Camera", "camera"),
+                        Pair("Calculator", "calculator"),
+                        Pair("Settings", "settings")
+                    )
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        quickApps.take(3).forEach { (label, appKey) ->
+                            Button(
+                                onClick = {
+                                    val res = viewModel.appLauncherManager.openAppByName(appKey)
+                                    appLaunchFeedback = res.feedbackMessage
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent.copy(alpha = 0.2f)),
+                                border = BorderStroke(1.dp, theme.primaryAccent),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).testTag("quick_launch_${appKey}")
+                            ) {
+                                Text(label, fontSize = 10.sp, color = theme.primaryAccent, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        quickApps.drop(3).forEach { (label, appKey) ->
+                            Button(
+                                onClick = {
+                                    val res = viewModel.appLauncherManager.openAppByName(appKey)
+                                    appLaunchFeedback = res.feedbackMessage
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent.copy(alpha = 0.2f)),
+                                border = BorderStroke(1.dp, theme.secondaryAccent),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).testTag("quick_launch_${appKey}")
+                            ) {
+                                Text(label, fontSize = 10.sp, color = theme.secondaryAccent, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = appLaunchTestQuery,
+                        onValueChange = { appLaunchTestQuery = it },
+                        label = { Text("App Launch Voice Command (e.g. \"YouTube kholo\", \"Launch WhatsApp\")", color = Color.LightGray, fontSize = 10.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = theme.primaryAccent,
+                            unfocusedBorderColor = Color.Gray,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = { viewModel.processSttUserQuery(appLaunchTestQuery) },
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("test_app_launch_cmd_btn")
+                    ) {
+                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Execute App Launch Command", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+
+                    appLaunchFeedback?.let { feedback ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF1E293B),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = feedback,
+                                fontSize = 11.sp,
+                                color = theme.primaryAccent,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -2675,7 +2800,7 @@ fun ApiKeyConfigDialog(
                     FilterChip(
                         selected = activeTab == 0,
                         onClick = { activeTab = 0 },
-                        label = { Text("ElevenLabs API", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        label = { Text("Swara Voice TTS", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.RecordVoiceOver,
@@ -2714,96 +2839,49 @@ fun ApiKeyConfigDialog(
                 }
 
                 if (activeTab == 0) {
-                    // ElevenLabs Section
+                    // Swara Native Voice Section
                     Text(
-                        "Input your ElevenLabs API Key to generate ultra-realistic multilingual TTS voice responses.",
+                        "MAX Assistant uses Android's native Text-to-Speech engine configured with the 'Swara' voice for instant, zero-latency, offline-capable Hindi & English speech output.",
                         fontSize = 12.sp,
                         color = Color.LightGray
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    OutlinedTextField(
-                        value = tempElevenLabsKey,
-                        onValueChange = { tempElevenLabsKey = it },
-                        placeholder = { Text("xi-api-key...", color = Color.Gray) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = theme.primaryAccent,
-                            unfocusedBorderColor = Color.Gray,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("elevenlabs_api_key_input")
-                    )
+                    var testStatusText by remember { mutableStateOf<String?>(null) }
 
-                    if (isValidatingKey) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = theme.primaryAccent,
-                                strokeWidth = 2.dp
-                            )
-                            Text(
-                                "Validating API key with ElevenLabs...",
-                                fontSize = 11.sp,
-                                color = theme.primaryAccent
-                            )
-                        }
-                    }
-
-                    validationStatus?.let { status ->
-                        Spacer(modifier = Modifier.height(10.dp))
-                        val isSuccess = status.contains("validated", ignoreCase = true) || status.contains("success", ignoreCase = true)
+                    testStatusText?.let { status ->
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if (isSuccess) Color(0xFF064E3B) else Color(0xFF7F1D1D),
-                            modifier = Modifier.fillMaxWidth()
+                            color = Color(0xFF064E3B),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp)
                         ) {
                             Text(
                                 text = status,
                                 fontSize = 11.sp,
-                                color = if (isSuccess) Color(0xFF6EE7B7) else Color(0xFFFCA5A5),
+                                color = Color(0xFF6EE7B7),
                                 modifier = Modifier.padding(8.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Button(
+                        onClick = {
+                            viewModel.testSwaraVoice("नमस्ते! मैं मैक्स हूँ। मैं आपकी सहायता के लिए तैयार हूँ।") { status ->
+                                testStatusText = status
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("test_swara_voice_btn")
                     ) {
-                        Button(
-                            onClick = {
-                                viewModel.validateAndSaveElevenLabsApiKey(tempElevenLabsKey)
-                            },
-                            enabled = !isValidatingKey && tempElevenLabsKey.isNotBlank(),
-                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("validate_elevenlabs_key_btn")
-                        ) {
-                            Text("Validate & Save", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.clearElevenLabsApiKey()
-                                tempElevenLabsKey = ""
-                            },
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Clear", color = Color.LightGray, fontSize = 12.sp)
-                        }
+                        Icon(imageVector = Icons.Default.RecordVoiceOver, contentDescription = "Test Voice", tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Test Swara Native Voice", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 } else {
                     // Gemini Section

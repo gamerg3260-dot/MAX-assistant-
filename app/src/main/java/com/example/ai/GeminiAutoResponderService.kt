@@ -5,6 +5,9 @@ import android.util.Log
 import com.example.data.repository.AppSettings
 import com.example.security.SecureKeyManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.MediaType.Companion.toMediaType
@@ -130,6 +133,110 @@ class GeminiAutoResponderService(private val context: Context) {
 
         executeGeminiRequest(prompt, settings.modelName)
     }
+
+    /**
+     * Streams voice response chunks from Gemini API asynchronously as text tokens are generated.
+     * Ensures immediate playback as soon as the first words/phrases are received.
+     */
+    fun streamMaxVoiceResponse(
+        userQuery: String,
+        settings: AppSettings
+    ): Flow<String> = flow {
+        val trimmedQuery = userQuery.trim()
+        if (trimmedQuery.isBlank()) {
+            emit("Query is empty.")
+            return@flow
+        }
+
+        val apiKey = SecureKeyManager.getApiKey(context)
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            emit("Gemini API key is not configured. Please set your key in Settings.")
+            return@flow
+        }
+
+        val prompt = buildString {
+            appendLine("You are MAX, an intelligent and helpful AI assistant.")
+            appendLine("User Query: \"$trimmedQuery\"")
+            appendLine()
+            appendLine("SYSTEM RULES:")
+            appendLine("1. Keep all responses concise, direct, and conversational (1-3 sentences max).")
+            appendLine("2. Format text specifically for Text-to-Speech engines: avoid complex Markdown, bullet points, code blocks, or special symbols.")
+            appendLine("3. Speak naturally in clear, engaging Hindi or English based on user input.")
+            appendLine("4. Avoid unnecessary fillers or polite intros; provide answers immediately.")
+            appendLine("5. Output ONLY the response text directly.")
+        }
+
+        val modelName = settings.modelName.trim()
+        val initialModel = when (modelName) {
+            "", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest" -> "gemini-3.6-flash"
+            else -> modelName
+        }
+
+        val modelsToTry = listOf(initialModel, "gemini-3.6-flash", "gemini-1.5-flash", "gemini-2.5-flash").distinct()
+
+        for (resolvedModel in modelsToTry) {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:streamGenerateContent?alt=sse&key=$apiKey"
+            val jsonBody = JSONObject().apply {
+                val contentsArray = JSONArray().apply {
+                    val contentObj = JSONObject().apply {
+                        val partsArray = JSONArray().apply {
+                            val partObj = JSONObject().apply {
+                                put("text", prompt)
+                            }
+                            put(partObj)
+                        }
+                        put("parts", partsArray)
+                    }
+                    put(contentObj)
+                }
+                put("contents", contentsArray)
+
+                val genConfig = JSONObject().apply {
+                    put("temperature", 0.7)
+                }
+                put("generationConfig", genConfig)
+            }
+
+            val request = Request.Builder()
+                .url(url)
+                .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            var streamSuccess = false
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val source = response.body?.source()
+                        if (source != null) {
+                            while (!source.exhausted()) {
+                                val line = source.readUtf8Line() ?: break
+                                if (line.startsWith("data: ")) {
+                                    val jsonStr = line.removePrefix("data: ").trim()
+                                    if (jsonStr == "[DONE]") break
+                                    val chunkText = parseCandidateText(jsonStr)
+                                    if (!chunkText.isNullOrBlank()) {
+                                        streamSuccess = true
+                                        emit(chunkText)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (streamSuccess) {
+                    return@flow
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "Streaming failed for model $resolvedModel: ${e.message}. Trying fallback...")
+            }
+        }
+
+        // Fallback to non-streaming if streaming endpoints were unreachable
+        when (val nonStreamRes = generateMaxVoiceResponse(trimmedQuery, settings)) {
+            is AiResult.Success -> emit(nonStreamRes.text)
+            is AiResult.Error -> emit("Error generating voice response: ${nonStreamRes.message}")
+        }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Executes the Gemini REST prompt with timeout and robust error classification.

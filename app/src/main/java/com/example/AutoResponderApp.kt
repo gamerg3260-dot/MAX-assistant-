@@ -42,6 +42,9 @@ class AutoResponderApp : Application() {
     lateinit var elevenLabsKeyManager: com.example.voice.ElevenLabsKeyManager
         private set
 
+    lateinit var swaraTtsService: com.example.voice.SwaraTtsService
+        private set
+
     lateinit var maxSttManager: com.example.voice.MaxSttManager
         private set
 
@@ -52,6 +55,9 @@ class AutoResponderApp : Application() {
         private set
 
     lateinit var maxCameraManager: com.example.camera.MaxCameraManager
+        private set
+
+    lateinit var appLauncherManager: com.example.launcher.AppLauncherManager
         private set
 
     lateinit var voskWakeWordDetector: com.example.voice.VoskWakeWordDetector
@@ -70,10 +76,12 @@ class AutoResponderApp : Application() {
         audioManagerHelper = CallVoiceAudioManager(this)
         elevenLabsKeyManager = com.example.voice.ElevenLabsKeyManager(this)
         elevenLabsTtsService = com.example.voice.ElevenLabsTtsService(this)
+        swaraTtsService = com.example.voice.SwaraTtsService(this)
         maxSttManager = com.example.voice.MaxSttManager(this)
         deviceToggleManager = com.example.toggle.DeviceToggleManager(this)
         emergencySosManager = com.example.sos.EmergencySosManager.getInstance(this)
         maxCameraManager = com.example.camera.MaxCameraManager.getInstance(this)
+        appLauncherManager = com.example.launcher.AppLauncherManager(this)
         voskWakeWordDetector = com.example.voice.VoskWakeWordDetector(this)
     }
 

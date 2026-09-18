@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Application
 import android.content.Context
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -49,6 +50,7 @@ data class IncomingCallSimState(
 
 class AutoResponderViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val tag = "AutoResponderVM"
     private val app = application as AutoResponderApp
     private val dao = app.database.autoResponderDao()
     private val callLogDao = app.database.callLogDao()
@@ -59,6 +61,8 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val voiceDetector = app.voiceCommandDetector
     val audioManagerHelper = app.audioManagerHelper
     val callController = app.callController
+    val swaraTtsService = app.swaraTtsService
+    val appLauncherManager = app.appLauncherManager
 
     val settings: StateFlow<AppSettings> = settingsRepo.settings
 
@@ -192,10 +196,10 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val rmsDbLevel: StateFlow<Float> = voiceDetector.rmsDbLevel
     val isTtsSpeaking: StateFlow<Boolean> = combine(
         announcer.isSpeaking,
-        elevenLabsService.isPlayingAudio,
+        swaraTtsService.isSpeaking,
         _isVoiceOrbSpeaking
-    ) { speakingTts, playingElevenLabs, speakingOrb ->
-        speakingTts || playingElevenLabs || speakingOrb
+    ) { speakingTts, speakingSwara, speakingOrb ->
+        speakingTts || speakingSwara || speakingOrb
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
@@ -488,36 +492,29 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         _isVoiceOrbSpeaking.value = false
         _isVoiceOrbActive.value = false
         maxSttManager.stopListening()
+        swaraTtsService.stop()
         elevenLabsService.stopAudio()
         announcer.stop()
         voskWakeWordDetector.resumeListening()
         _voiceOrbStatus.value = "Tap MAX Voice Orb to speak"
     }
 
-    fun testElevenLabsVoice(
+    fun testSwaraVoice(
         text: String = "नमस्ते! मैं मैक्स हूँ। मैं आपकी क्या मदद कर सकता हूँ?",
-        voiceId: String = "21m00Tcm4TlvDq8ikWAM",
         onResult: (String) -> Unit
     ) {
-        viewModelScope.launch {
-            onResult("Generating ElevenLabs speech audio...")
-            val result = elevenLabsService.generateSpeech(
-                text = text,
-                voiceId = voiceId,
-                modelId = "eleven_multilingual_v2"
-            )
-            when (result) {
-                is com.example.voice.ElevenLabsResult.Success -> {
-                    onResult("Playing ElevenLabs audio output...")
-                    elevenLabsService.playAudio(result.audioFile) {
-                        onResult("Audio playback completed successfully!")
-                    }
-                }
-                is com.example.voice.ElevenLabsResult.Error -> {
-                    onResult("Error: ${result.message}")
-                }
-            }
+        onResult("Speaking via Swara Native TTS Voice...")
+        swaraTtsService.speak(text) {
+            onResult("Swara voice playback completed!")
         }
+    }
+
+    fun testElevenLabsVoice(
+        text: String = "नमस्ते! मैं मैक्स हूँ। मैं आपकी क्या मदद कर सकता हूँ?",
+        voiceId: String = "swara_voice",
+        onResult: (String) -> Unit
+    ) {
+        testSwaraVoice(text, onResult)
     }
 
     fun clearHistory() {
@@ -606,11 +603,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 currentList.add(Pair(spokenText, feedback))
                 _sttConversationLog.value = currentList
 
-                if (elevenLabsKeyManager.hasValidApiKey()) {
-                    testElevenLabsVoice(text = feedback) {}
-                } else {
-                    fallbackAndroidTts(feedback)
-                }
+                swaraTtsService.speak(feedback)
                 return@launch
             }
 
@@ -626,11 +619,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 currentList.add(Pair(spokenText, feedback))
                 _sttConversationLog.value = currentList
 
-                if (elevenLabsKeyManager.hasValidApiKey()) {
-                    testElevenLabsVoice(text = feedback) {}
-                } else {
-                    fallbackAndroidTts(feedback)
-                }
+                swaraTtsService.speak(feedback)
                 return@launch
             }
 
@@ -646,11 +635,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 currentList.add(Pair(spokenText, feedback))
                 _sttConversationLog.value = currentList
 
-                if (elevenLabsKeyManager.hasValidApiKey()) {
-                    testElevenLabsVoice(text = feedback) {}
-                } else {
-                    fallbackAndroidTts(feedback)
-                }
+                swaraTtsService.speak(feedback)
                 return@launch
             }
 
@@ -666,75 +651,71 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 currentList.add(Pair(spokenText, feedback))
                 _sttConversationLog.value = currentList
 
-                if (elevenLabsKeyManager.hasValidApiKey()) {
-                    testElevenLabsVoice(text = feedback) {}
-                } else {
-                    fallbackAndroidTts(feedback)
-                }
+                swaraTtsService.speak(feedback)
                 return@launch
             }
 
-            _sttPipelineStatus.value = "User: \"$spokenText\" -> Asking Gemini AI..."
-            
-            // Generate response from Gemini AI
-            val aiResult = geminiService.generateMaxVoiceResponse(
-                userQuery = spokenText,
-                settings = settings.value
-            )
+            // 3. Check for App Launch voice commands (e.g. "Open YouTube", "YouTube kholo", "Launch WhatsApp")
+            val appLaunchRes = appLauncherManager.processVoiceAppLaunchCommand(spokenText)
+            if (appLaunchRes.isHandled) {
+                val feedback = appLaunchRes.feedbackMessage
+                _isGeminiProcessing.value = false
+                _latestAssistantResponse.value = feedback
+                _sttPipelineStatus.value = "App Launcher: $feedback"
 
-            _isGeminiProcessing.value = false
-            when (aiResult) {
-                is com.example.ai.AiResult.Success -> {
-                    val aiReplyText = aiResult.text
-                    _latestAssistantResponse.value = aiReplyText
-                    _sttPipelineStatus.value = "Gemini AI: \"$aiReplyText\" -> Generating ElevenLabs TTS..."
-                    _voiceOrbStatus.value = "Gemini AI: \"$aiReplyText\""
+                val currentList = _sttConversationLog.value.toMutableList()
+                currentList.add(Pair(spokenText, feedback))
+                _sttConversationLog.value = currentList
+
+                swaraTtsService.speak(feedback)
+                return@launch
+            }
+
+            _sttPipelineStatus.value = "User: \"$spokenText\" -> Streaming Gemini AI..."
+            _isGeminiProcessing.value = true
+
+            var fullText = ""
+            var isFirstChunk = true
+
+            try {
+                geminiService.streamMaxVoiceResponse(
+                    userQuery = spokenText,
+                    settings = settings.value
+                ).collect { chunk ->
+                    _isGeminiProcessing.value = false
                     _isVoiceOrbSpeaking.value = true
-                    
-                    // Add to conversation log
-                    val currentList = _sttConversationLog.value.toMutableList()
-                    currentList.add(Pair(spokenText, aiReplyText))
-                    _sttConversationLog.value = currentList
+                    fullText += chunk
+                    _latestAssistantResponse.value = fullText
+                    _voiceOrbStatus.value = "MAX: $fullText"
+                    _sttPipelineStatus.value = "Speaking via Swara Native Voice..."
 
-                    // Feed into ElevenLabs TTS
-                    if (elevenLabsKeyManager.hasValidApiKey()) {
-                        val ttsResult = elevenLabsService.generateSpeech(
-                            text = aiReplyText,
-                            voiceId = "21m00Tcm4TlvDq8ikWAM"
-                        )
-                        when (ttsResult) {
-                            is com.example.voice.ElevenLabsResult.Success -> {
-                                _sttPipelineStatus.value = "Playing ElevenLabs natural voice response..."
-                                elevenLabsService.playAudio(ttsResult.audioFile) {
-                                    _isVoiceOrbSpeaking.value = false
-                                    _isVoiceOrbActive.value = false
-                                    _voiceOrbStatus.value = "Tap mic to speak with MAX"
-                                    _sttPipelineStatus.value = "Voice interaction complete."
-                                    voskWakeWordDetector.resumeListening()
-                                }
-                            }
-                            is com.example.voice.ElevenLabsResult.Error -> {
-                                _sttPipelineStatus.value = "ElevenLabs Error: ${ttsResult.message}. Falling back to standard TTS..."
-                                fallbackAndroidTts(aiReplyText)
-                            }
-                        }
-                    } else {
-                        _sttPipelineStatus.value = "ElevenLabs key missing. Playing response via standard Android TTS..."
-                        fallbackAndroidTts(aiReplyText)
-                    }
+                    swaraTtsService.speakChunk(chunk, isFirstChunk)
+                    isFirstChunk = false
                 }
-                is com.example.ai.AiResult.Error -> {
-                    val errorMsg = "Gemini AI Error: ${aiResult.message}"
-                    _sttPipelineStatus.value = errorMsg
+
+                if (fullText.isNotBlank()) {
+                    val currentList = _sttConversationLog.value.toMutableList()
+                    currentList.add(Pair(spokenText, fullText))
+                    _sttConversationLog.value = currentList
+                } else {
                     val fallbackMsg = if (!SecureKeyManager.hasValidApiKey(getApplication())) {
                         "Gemini API key is not configured. Please save your API key in Settings."
                     } else {
-                        "Sorry, I could not complete the request right now. Check your internet connection."
+                        "Sorry, I could not complete the request right now."
                     }
                     _latestAssistantResponse.value = fallbackMsg
                     _voiceOrbStatus.value = fallbackMsg
-                    fallbackAndroidTts(fallbackMsg)
+                    swaraTtsService.speak(fallbackMsg)
                 }
+            } catch (e: Exception) {
+                Log.e(tag, "Error during Gemini streaming: ${e.message}", e)
+                val err = "Error: ${e.localizedMessage ?: "Network error"}"
+                _sttPipelineStatus.value = err
+                _latestAssistantResponse.value = err
+                swaraTtsService.speak(err)
+            } finally {
+                _isGeminiProcessing.value = false
+                voskWakeWordDetector.resumeListening()
             }
         }
     }

@@ -319,48 +319,67 @@ class MaxOverlayService : Service() {
         stt.onSpeechRecognizedListener = { spokenQuery ->
             _isListening.value = false
             _isProcessing.value = true
-            _overlayStatus.value = "User: \"$spokenQuery\" • Thinking with Gemini..."
+            _overlayStatus.value = "User: \"$spokenQuery\""
 
             serviceScope.launch {
+                val appInstance = com.example.AutoResponderApp.instance
+                val swaraTts = appInstance.swaraTtsService
+
+                // 1. App Launch commands
+                val appLaunchRes = appInstance.appLauncherManager.processVoiceAppLaunchCommand(spokenQuery)
+                if (appLaunchRes.isHandled) {
+                    val feedback = appLaunchRes.feedbackMessage
+                    _isProcessing.value = false
+                    _overlayStatus.value = "App Launcher"
+                    _overlayResponse.value = feedback
+                    swaraTts.speak(feedback)
+                    vosk.resumeListening()
+                    return@launch
+                }
+
+                // 2. Hardware Toggle commands
+                val voiceToggleRes = appInstance.deviceToggleManager.processVoiceToggleCommand(spokenQuery)
+                if (voiceToggleRes.isHandled) {
+                    val feedback = voiceToggleRes.feedbackMessage
+                    _isProcessing.value = false
+                    _overlayStatus.value = "Hardware Control"
+                    _overlayResponse.value = feedback
+                    swaraTts.speak(feedback)
+                    vosk.resumeListening()
+                    return@launch
+                }
+
                 val settings = settingsRepo.settings.value
-                val result = gemini.generateMaxVoiceResponse(spokenQuery, settings)
+                var fullReply = ""
+                var isFirst = true
 
-                _isProcessing.value = false
-                when (result) {
-                    is AiResult.Success -> {
-                        val reply = result.text
-                        _overlayStatus.value = "MAX Assistant Response"
-                        _overlayResponse.value = reply
+                try {
+                    gemini.streamMaxVoiceResponse(spokenQuery, settings).collect { chunk ->
+                        _isProcessing.value = false
                         _isSpeaking.value = true
+                        fullReply += chunk
+                        _overlayStatus.value = "MAX Assistant Response"
+                        _overlayResponse.value = fullReply
 
-                        if (elevenLabsKey.hasValidApiKey()) {
-                            val audioRes = elevenLabs.generateSpeech(reply, "21m00Tcm4TlvDq8ikWAM")
-                            when (audioRes) {
-                                is com.example.voice.ElevenLabsResult.Success -> {
-                                    elevenLabs.playAudio(audioRes.audioFile) {
-                                        _isSpeaking.value = false
-                                        _overlayStatus.value = "Tap mic or say 'Hey Max'"
-                                        vosk.resumeListening()
-                                    }
-                                }
-                                is com.example.voice.ElevenLabsResult.Error -> {
-                                    speakWithAndroidTts(reply, announcer) {
-                                        vosk.resumeListening()
-                                    }
-                                }
-                            }
-                        } else {
-                            speakWithAndroidTts(reply, announcer) {
-                                vosk.resumeListening()
-                            }
-                        }
+                        swaraTts.speakChunk(chunk, isFirst)
+                        isFirst = false
                     }
-                    is AiResult.Error -> {
-                        val err = "Gemini AI: ${result.message}"
-                        _overlayStatus.value = err
-                        _isSpeaking.value = false
-                        vosk.resumeListening()
+
+                    if (fullReply.isBlank()) {
+                        val fallback = "Sorry, I could not complete the request right now."
+                        _overlayResponse.value = fallback
+                        swaraTts.speak(fallback)
                     }
+                } catch (e: Exception) {
+                    val err = "Error: ${e.localizedMessage ?: "Unknown error"}"
+                    _overlayStatus.value = err
+                    _overlayResponse.value = err
+                    swaraTts.speak(err)
+                } finally {
+                    _isProcessing.value = false
+                    _isSpeaking.value = false
+                    _overlayStatus.value = "Tap mic or say 'Hey Max'"
+                    vosk.resumeListening()
                 }
             }
         }
