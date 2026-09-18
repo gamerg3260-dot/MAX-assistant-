@@ -58,7 +58,7 @@ class OpenWakeWordDetector(private val context: Context) {
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         const val FRAME_SIZE = 1280 // 80ms at 16kHz
-        const val DETECTION_THRESHOLD = 0.50f
+        const val DETECTION_THRESHOLD = 0.60f
         const val REFRACTORY_DEBOUNCE_MS = 1500L
 
         // Target Wake Phrases monitored concurrently
@@ -155,11 +155,17 @@ class OpenWakeWordDetector(private val context: Context) {
      */
     private fun copyAssetToFile(assetPath: String, outputFile: File) {
         try {
-            context.assets.open(assetPath).use { input ->
+            val inputStream = try {
+                context.assets.open(assetPath)
+            } catch (_: Exception) {
+                context.assets.open(File(assetPath).name)
+            }
+            inputStream.use { input ->
                 FileOutputStream(outputFile).use { output ->
                     input.copyTo(output)
                 }
             }
+            Log.i(tag, "Successfully copied ONNX asset $assetPath to ${outputFile.absolutePath}")
         } catch (e: Exception) {
             Log.w(tag, "Asset $assetPath not present in APK assets: ${e.message}")
         }
@@ -350,6 +356,37 @@ class OpenWakeWordDetector(private val context: Context) {
     }
 
     /**
+     * Requests transient audio focus when a wake-word is detected to pause background audio/media.
+     */
+    private fun requestTransientAudioFocus() {
+        try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val focusRequest = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAcceptsDelayedFocusGain(false)
+                    .build()
+                audioManager.requestAudioFocus(focusRequest)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.requestAudioFocus(
+                    null,
+                    android.media.AudioManager.STREAM_MUSIC,
+                    android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                )
+            }
+            Log.i(tag, "Transient audio focus requested on wake-word detection.")
+        } catch (e: Exception) {
+            Log.w(tag, "Error requesting transient audio focus: ${e.message}")
+        }
+    }
+
+    /**
      * Handles positive wake-word detection.
      */
     private fun triggerWakeWordMatch(wakePhrase: String, score: Float = 1.0f) {
@@ -358,7 +395,10 @@ class OpenWakeWordDetector(private val context: Context) {
 
         lastTriggerTimestamp = now
         _lastDetectedPhrase.value = wakePhrase
-        Log.i(tag, ">>> MULTI-WAKE-WORD DETECTED: \"$wakePhrase\" (score=$score) <<<")
+        Log.i(tag, ">>> MULTI-WAKE-WORD DETECTED: \"$wakePhrase\" (score=$score >= $DETECTION_THRESHOLD) <<<")
+
+        // Request transient audio focus to pause background media
+        requestTransientAudioFocus()
 
         scope.launch(Dispatchers.Main) {
             onWakeWordDetected?.invoke(wakePhrase)
