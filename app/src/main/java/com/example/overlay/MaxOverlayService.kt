@@ -306,10 +306,10 @@ class MaxOverlayService : Service() {
         val elevenLabs = app.elevenLabsTtsService
         val elevenLabsKey = app.elevenLabsKeyManager
         val announcer = app.callAnnouncer
-        val vosk = app.voskWakeWordDetector
+        val openWakeWord = app.openWakeWordDetector
 
-        // Pause Vosk continuous wake-word detector so mic isn't contested
-        vosk.pauseListening()
+        // Pause OpenWakeWord continuous wake-word detector so mic isn't contested
+        openWakeWord.pauseListening()
 
         _isListening.value = true
         _isProcessing.value = false
@@ -333,7 +333,7 @@ class MaxOverlayService : Service() {
                     _overlayStatus.value = "App Launcher"
                     _overlayResponse.value = feedback
                     swaraTts.speak(feedback)
-                    vosk.resumeListening()
+                    openWakeWord.resumeListening()
                     return@launch
                 }
 
@@ -345,7 +345,7 @@ class MaxOverlayService : Service() {
                     _overlayStatus.value = "Hardware Control"
                     _overlayResponse.value = feedback
                     swaraTts.speak(feedback)
-                    vosk.resumeListening()
+                    openWakeWord.resumeListening()
                     return@launch
                 }
 
@@ -378,8 +378,8 @@ class MaxOverlayService : Service() {
                 } finally {
                     _isProcessing.value = false
                     _isSpeaking.value = false
-                    _overlayStatus.value = "Tap mic or say 'Hey Max'"
-                    vosk.resumeListening()
+                    _overlayStatus.value = "Say 'Okay Max' / 'Backup Max' / 'Hey Max'"
+                    openWakeWord.resumeListening()
                 }
             }
         }
@@ -388,7 +388,7 @@ class MaxOverlayService : Service() {
             _isListening.value = false
             _isProcessing.value = false
             _overlayStatus.value = "Speech recognition: $errorMsg"
-            vosk.resumeListening()
+            openWakeWord.resumeListening()
         }
 
         serviceScope.launch {

@@ -52,7 +52,7 @@ class MaxAssistantForegroundService : Service() {
     private lateinit var announcer: CallAnnouncer
     private lateinit var voiceDetector: VoiceCommandDetector
     private lateinit var audioManagerHelper: CallVoiceAudioManager
-    private var voskDetector: com.example.voice.VoskWakeWordDetector? = null
+    private var openWakeWordDetector: com.example.voice.OpenWakeWordDetector? = null
 
     private var currentRingingNumber: String? = null
     private var isCallHandled = false
@@ -66,7 +66,7 @@ class MaxAssistantForegroundService : Service() {
         announcer = CallAnnouncer(this)
         voiceDetector = VoiceCommandDetector(this)
         audioManagerHelper = CallVoiceAudioManager(this)
-        voskDetector = (application as? AutoResponderApp)?.voskWakeWordDetector
+        openWakeWordDetector = (application as? AutoResponderApp)?.openWakeWordDetector
 
         createNotificationChannel()
         setupVoiceCommandCallbacks()
@@ -76,9 +76,9 @@ class MaxAssistantForegroundService : Service() {
     }
 
     private fun setupWakeWordCallbacks() {
-        voskDetector?.onWakeWordDetected = { wakePhrase ->
-            Log.i(TAG, "Wake word '$wakePhrase' triggered from background!")
-            _liveVoiceState.value = "Wake word detected: $wakePhrase"
+        openWakeWordDetector?.onWakeWordDetected = { wakePhrase ->
+            Log.i(TAG, "OpenWakeWord multi-phrase '$wakePhrase' triggered from background service!")
+            _liveVoiceState.value = "Multi-Wake-Word: $wakePhrase"
             
             // Check microphone permission before showing overlay
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -89,15 +89,15 @@ class MaxAssistantForegroundService : Service() {
             }
         }
 
-        voskDetector?.onError = { err ->
-            Log.w(TAG, "Vosk background detector warning: $err")
+        openWakeWordDetector?.onError = { err ->
+            Log.w(TAG, "OpenWakeWord background detector warning: $err")
         }
     }
 
     private fun startContinuousWakeWordListening() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            Log.i(TAG, "Starting continuous background Vosk wake-word listener ('Hey Max')...")
-            voskDetector?.startListening()
+            Log.i(TAG, "Starting continuous background OpenWakeWord engine monitoring (\"Okay Max\", \"Backup Max\", \"Hey Max\")...")
+            openWakeWordDetector?.startListening()
         } else {
             Log.w(TAG, "RECORD_AUDIO not granted. Background wake-word detection postponed.")
         }

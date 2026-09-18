@@ -58,6 +58,12 @@ class GeminiAutoResponderService(private val context: Context) {
             return@withContext AiResult.Error("Incoming message content is empty.")
         }
 
+        // Fast Local Rule Engine check (0ms latency response)
+        FastLocalRuleEngine.evaluate(incomingMessage)?.let { fastReply ->
+            Log.i(tag, "Fast Local Rule Engine matched instant SMS reply: \"$fastReply\" (0ms API latency saved)")
+            return@withContext AiResult.Success(fastReply, "Fast Local Rule Engine")
+        }
+
         val prompt = buildString {
             appendLine("You are MAX, an intelligent and helpful AI assistant responding on behalf of the device owner.")
             appendLine("Owner Current Persona: ${settings.selectedPersona}")
@@ -75,6 +81,43 @@ class GeminiAutoResponderService(private val context: Context) {
             appendLine("4. Avoid unnecessary fillers or polite intros; provide answers immediately.")
             appendLine("5. Keep it short (maximum 160 characters if possible).")
             appendLine("6. Output ONLY the reply text directly. Do not include quotes, prefixes, or explanations.")
+        }
+
+        executeGeminiRequest(prompt, settings.modelName)
+    }
+
+    /**
+     * Generates a context-aware auto-reply for an incoming WhatsApp notification message.
+     */
+    suspend fun generateWhatsAppReply(
+        senderName: String,
+        incomingMessage: String,
+        settings: AppSettings
+    ): AiResult = withContext(Dispatchers.IO) {
+        if (incomingMessage.isBlank()) {
+            return@withContext AiResult.Error("Incoming message content is empty.")
+        }
+
+        // Fast Local Rule Engine check (0ms latency response)
+        FastLocalRuleEngine.evaluate(incomingMessage)?.let { fastReply ->
+            Log.i(tag, "Fast Local Rule Engine matched instant WhatsApp reply: \"$fastReply\" (0ms API latency saved)")
+            return@withContext AiResult.Success(fastReply, "Fast Local Rule Engine")
+        }
+
+        val prompt = buildString {
+            appendLine("You are MAX, an intelligent and helpful AI assistant responding to a WhatsApp message on behalf of the device owner.")
+            appendLine("Owner Persona: ${settings.selectedPersona}")
+            appendLine("Owner Context/Instructions: ${settings.customInstructions}")
+            appendLine("Desired Tone: ${settings.responseTone}")
+            appendLine("WhatsApp Sender: $senderName")
+            appendLine("Incoming WhatsApp Message: \"$incomingMessage\"")
+            appendLine()
+            appendLine("TASK:")
+            appendLine("Write a concise, natural, context-aware auto-reply to send back via WhatsApp.")
+            appendLine("RULES:")
+            appendLine("1. Keep response direct, friendly, and brief (1-2 sentences max).")
+            appendLine("2. Speak naturally in clear, engaging Hindi or English matching the sender's tone.")
+            appendLine("3. Output ONLY the reply text directly. No quotes or prefixes.")
         }
 
         executeGeminiRequest(prompt, settings.modelName)
@@ -119,6 +162,12 @@ class GeminiAutoResponderService(private val context: Context) {
             return@withContext AiResult.Error("Query is empty.")
         }
 
+        // Fast Local Rule Engine check (0ms latency response)
+        FastLocalRuleEngine.evaluate(userQuery)?.let { fastReply ->
+            Log.i(tag, "Fast Local Rule Engine matched instant voice response: \"$fastReply\" (0ms API latency saved)")
+            return@withContext AiResult.Success(fastReply, "Fast Local Rule Engine")
+        }
+
         val prompt = buildString {
             appendLine("You are MAX, an intelligent and helpful AI assistant.")
             appendLine("User Query: \"$userQuery\"")
@@ -145,6 +194,13 @@ class GeminiAutoResponderService(private val context: Context) {
         val trimmedQuery = userQuery.trim()
         if (trimmedQuery.isBlank()) {
             emit("Query is empty.")
+            return@flow
+        }
+
+        // Fast Local Rule Engine check (0ms latency response)
+        FastLocalRuleEngine.evaluate(trimmedQuery)?.let { fastReply ->
+            Log.i(tag, "Fast Local Rule Engine matched streaming voice query: \"$fastReply\" (0ms API latency saved)")
+            emit(fastReply)
             return@flow
         }
 
@@ -192,7 +248,10 @@ class GeminiAutoResponderService(private val context: Context) {
                 put("contents", contentsArray)
 
                 val genConfig = JSONObject().apply {
-                    put("temperature", 0.7)
+                    put("temperature", 0.3)
+                    put("maxOutputTokens", 120)
+                    put("topP", 0.8)
+                    put("topK", 20)
                 }
                 put("generationConfig", genConfig)
             }
@@ -285,7 +344,10 @@ class GeminiAutoResponderService(private val context: Context) {
                             put("contents", contentsArray)
 
                             val genConfig = JSONObject().apply {
-                                put("temperature", 0.7)
+                                put("temperature", 0.3)
+                                put("maxOutputTokens", 120)
+                                put("topP", 0.8)
+                                put("topK", 20)
                             }
                             put("generationConfig", genConfig)
                         }

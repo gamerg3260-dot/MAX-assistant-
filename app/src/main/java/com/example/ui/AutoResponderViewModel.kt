@@ -63,6 +63,17 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val callController = app.callController
     val swaraTtsService = app.swaraTtsService
     val appLauncherManager = app.appLauncherManager
+    val intruderSecurityManager = app.intruderSecurityManager
+    val speakerVerificationManager = app.speakerVerificationManager
+
+    val failedUnlockCount: StateFlow<Int> = intruderSecurityManager.failedUnlockCount
+    val lastFailedTimestamp: StateFlow<Long?> = intruderSecurityManager.lastFailedTimestamp
+    val isAlarmRinging: StateFlow<Boolean> = intruderSecurityManager.isAlarmRinging
+    val capturedIntruderImages: StateFlow<List<java.io.File>> = intruderSecurityManager.capturedIntruderImages
+
+    val isVoiceEnrolled: StateFlow<Boolean> = speakerVerificationManager.isVoiceEnrolled
+    val speakerTargetThreshold: StateFlow<Float> = speakerVerificationManager.targetThreshold
+    val lastVerificationScore: StateFlow<Float?> = speakerVerificationManager.lastVerificationScore
 
     val settings: StateFlow<AppSettings> = settingsRepo.settings
 
@@ -183,10 +194,10 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val lastCapturedVideoUri: StateFlow<android.net.Uri?> = maxCameraManager.lastCapturedVideoUri
     val cameraStatus: StateFlow<String?> = maxCameraManager.cameraStatus
 
-    // Vosk Offline Wake-Word ("Hey Max") State Flows
-    val voskWakeWordDetector = app.voskWakeWordDetector
-    val wakeWordState = voskWakeWordDetector.state
-    val wakeWordRmsDb = voskWakeWordDetector.rmsDbLevel
+    // OpenWakeWord Multi-Wake-Word ("Okay Max", "Backup Max", "Hey Max") State Flows
+    val openWakeWordDetector = app.openWakeWordDetector
+    val wakeWordState = openWakeWordDetector.state
+    val wakeWordRmsDb = openWakeWordDetector.rmsDbLevel
 
     // Service & Voice reactive state flows
     val isServiceRunning: StateFlow<Boolean> = MaxAssistantForegroundService.isServiceRunning
@@ -333,6 +344,10 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         settingsRepo.setWhatsAppAutoRead(enabled)
     }
 
+    fun toggleWhatsAppAutoReply(enabled: Boolean) {
+        settingsRepo.setWhatsAppAutoReplyEnabled(enabled)
+    }
+
     fun toggleYouTubeMediaAutoPause(enabled: Boolean) {
         settingsRepo.setYouTubeMediaAutoPause(enabled)
     }
@@ -448,7 +463,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
 
     /**
      * Toggles the MAX Voice Orb:
-     * When toggled ON, listens for user voice with Vosk offline model, sends text to Gemini AI,
+     * When toggled ON, listens for user voice with OpenWakeWord multi-engine, sends text to Gemini AI,
      * and speaks back responses via ElevenLabs or System TTS.
      * When toggled OFF or tapped while active, cancels speech/listening.
      */
@@ -478,11 +493,11 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             _sttPipelineStatus.value = "RECORD_AUDIO permission missing. Please grant microphone access."
             return
         }
-        voskWakeWordDetector.pauseListening()
+        openWakeWordDetector.pauseListening()
         _isVoiceOrbActive.value = true
         _isVoiceOrbListening.value = true
         _isVoiceOrbSpeaking.value = false
-        _voiceOrbStatus.value = "Listening with Vosk offline model & Gemini AI..."
+        _voiceOrbStatus.value = "Listening with OpenWakeWord multi-engine & Gemini AI..."
         audioManagerHelper.playListeningPromptBeep()
         maxSttManager.startListening(preferredLanguage = "hi-IN")
     }
@@ -495,7 +510,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         swaraTtsService.stop()
         elevenLabsService.stopAudio()
         announcer.stop()
-        voskWakeWordDetector.resumeListening()
+        openWakeWordDetector.resumeListening()
         _voiceOrbStatus.value = "Tap MAX Voice Orb to speak"
     }
 
@@ -715,7 +730,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 swaraTtsService.speak(err)
             } finally {
                 _isGeminiProcessing.value = false
-                voskWakeWordDetector.resumeListening()
+                openWakeWordDetector.resumeListening()
             }
         }
     }
@@ -734,7 +749,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 _isVoiceOrbSpeaking.value = false
                 _isVoiceOrbActive.value = false
                 _voiceOrbStatus.value = "Tap MAX Voice Orb to speak"
-                voskWakeWordDetector.resumeListening()
+                openWakeWordDetector.resumeListening()
                 onDone?.invoke()
             }
         )
@@ -1302,5 +1317,50 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
 
     fun stopVideoRecording() {
         maxCameraManager.stopVideoRecording()
+    }
+
+    // Device Admin Security Helpers
+    fun isDeviceAdminActive(): Boolean {
+        val dpm = getApplication<AutoResponderApp>().getSystemService(android.content.Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
+        val adminComponent = android.content.ComponentName(getApplication(), com.example.security.MaxDeviceAdminReceiver::class.java)
+        return dpm.isAdminActive(adminComponent)
+    }
+
+    fun getDeviceAdminEnableIntent(): android.content.Intent {
+        val adminComponent = android.content.ComponentName(getApplication(), com.example.security.MaxDeviceAdminReceiver::class.java)
+        return android.content.Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+            putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+            putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Activate MAX Assistant Device Admin protection to detect failed unlock attempts, play intruder alarms, and capture background intruder photos.")
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
+
+    fun triggerTestSecurityAlarm() {
+        intruderSecurityManager.triggerLoudAlarm()
+    }
+
+    fun stopSecurityAlarm() {
+        intruderSecurityManager.stopLoudAlarm()
+    }
+
+    fun triggerTestSilentCapture() {
+        intruderSecurityManager.captureSilentFrontCameraSnapshot()
+    }
+
+    fun clearIntruderLogs() {
+        intruderSecurityManager.clearIntruderLogs()
+    }
+
+    // Speaker Verification Helpers
+    fun setSpeakerThreshold(threshold: Float) {
+        speakerVerificationManager.setTargetThreshold(threshold)
+    }
+
+    fun enrollVoiceProfile(pcmAudio: FloatArray): Boolean {
+        return speakerVerificationManager.enrollVoiceProfile(pcmAudio)
+    }
+
+    fun deleteVoiceProfile() {
+        speakerVerificationManager.deleteVoiceProfile()
     }
 }

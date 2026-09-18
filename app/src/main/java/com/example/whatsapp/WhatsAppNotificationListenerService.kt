@@ -1,11 +1,16 @@
 package com.example.whatsapp
 
 import android.app.Notification
-import android.app.RemoteInput
-import android.os.Bundle
+import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.example.AutoResponderApp
+import com.example.ai.AiResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Service extending NotificationListenerService to intercept incoming WhatsApp messages and
@@ -13,6 +18,7 @@ import android.util.Log
  */
 class WhatsAppNotificationListenerService : NotificationListenerService() {
     private val tag = "WhatsAppNotifService"
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -28,6 +34,15 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         // Intercept WhatsApp, WhatsApp Business, and compatible messaging notifications
         val isWhatsApp = pkg.contains("whatsapp", ignoreCase = true)
         if (!isWhatsApp) return
+
+        // 1. Check SharedPreferences key "whatsapp_auto_reply_enabled"
+        val prefs = applicationContext.getSharedPreferences("app_settings_prefs", Context.MODE_PRIVATE)
+        val isAutoReplyEnabled = prefs.getBoolean("whatsapp_auto_reply_enabled", true)
+
+        if (!isAutoReplyEnabled) {
+            Log.i(tag, "WhatsApp Auto-Reply switch is OFF ('whatsapp_auto_reply_enabled' = false). Ignoring notification completely.")
+            return
+        }
 
         try {
             val notification = sbn.notification ?: return
@@ -63,13 +78,54 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
             }
 
             // Pass intercepted message to WhatsAppControlManager
-            WhatsAppControlManager.instance.onMessageReceived(
+            val interceptedMsg = WhatsAppControlManager.instance.onMessageReceived(
                 sender = title,
                 text = text,
                 packageName = pkg,
                 notificationKey = sbn.key,
                 replyAction = replyAction
             )
+
+            // 2. Since Auto-Reply is ON, pass to MAX Assistant AI (Gemini API) to generate response and reply via RemoteInput
+            if (replyAction != null) {
+                val app = applicationContext as? AutoResponderApp
+                val geminiService = app?.geminiService
+                val settingsRepo = app?.settingsRepository
+
+                if (geminiService != null && settingsRepo != null) {
+                    scope.launch {
+                        try {
+                            val settings = settingsRepo.settings.value
+                            Log.i(tag, "Generating Gemini AI response for WhatsApp notification from $title: \"$text\"")
+                            val aiResult = geminiService.generateWhatsAppReply(
+                                senderName = title,
+                                incomingMessage = text,
+                                settings = settings
+                            )
+
+                            when (aiResult) {
+                                is AiResult.Success -> {
+                                    val aiReply = aiResult.text
+                                    Log.i(tag, "Gemini AI reply generated: \"$aiReply\". Sending back via RemoteInput...")
+                                    val success = WhatsAppControlManager.instance.sendRemoteInputReply(
+                                        context = applicationContext,
+                                        messageId = interceptedMsg.id,
+                                        replyText = aiReply
+                                    )
+                                    if (success) {
+                                        Log.i(tag, "Successfully sent WhatsApp auto-reply via RemoteInput!")
+                                    }
+                                }
+                                is AiResult.Error -> {
+                                    Log.e(tag, "Gemini AI WhatsApp Auto-Reply Error: ${aiResult.message}")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(tag, "Error during WhatsApp AI auto-reply execution: ${e.message}", e)
+                        }
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(tag, "Error parsing WhatsApp notification: ${e.message}", e)
         }

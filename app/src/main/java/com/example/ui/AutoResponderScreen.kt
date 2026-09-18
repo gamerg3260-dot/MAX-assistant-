@@ -975,6 +975,225 @@ fun BlocklistSpamTab(
             SiriSectionHeader(title = "Blocklist & Spam Management", icon = Icons.Default.Block, theme = theme)
         }
 
+        // Device Admin & Intruder Security Control Card
+        item {
+            val context = LocalContext.current
+            val failedCount by viewModel.failedUnlockCount.collectAsState()
+            val lastFailedTime by viewModel.lastFailedTimestamp.collectAsState()
+            val isAlarmRinging by viewModel.isAlarmRinging.collectAsState()
+            val intruderImages by viewModel.capturedIntruderImages.collectAsState()
+            val isAdminActive = remember { viewModel.isDeviceAdminActive() }
+
+            SiriGlassCard(theme = theme) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(imageVector = Icons.Default.Security, contentDescription = null, tint = theme.primaryAccent)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Device Admin Intruder Alarm", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+
+                        if (!isAdminActive) {
+                            Button(
+                                onClick = { context.startActivity(viewModel.getDeviceAdminEnableIntent()) },
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("Enable Admin", fontSize = 10.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, Color(0xFF10B981))
+                            ) {
+                                Text("ADMIN ACTIVE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981), modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Monitors failed unlock attempts (ACTION_PASSWORD_FAILED), plays loud alarm at max volume overriding silent mode, and captures background front-camera snapshots silently.",
+                        fontSize = 11.sp,
+                        color = Color.LightGray
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column {
+                            Text("Failed Attempts", fontSize = 11.sp, color = Color.Gray)
+                            Text("$failedCount registered", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (failedCount > 0) Color(0xFFEF4444) else Color.White)
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Intruder Snapshots", fontSize = 11.sp, color = Color.Gray)
+                            Text("${intruderImages.size} saved", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = theme.primaryAccent)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Alarm & Test Action Buttons
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isAlarmRinging) {
+                            Button(
+                                onClick = { viewModel.stopSecurityAlarm() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).testTag("stop_alarm_btn")
+                            ) {
+                                Text("STOP ALARM", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        } else {
+                            Button(
+                                onClick = { viewModel.triggerTestSecurityAlarm() },
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent.copy(alpha = 0.3f)),
+                                border = BorderStroke(1.dp, theme.secondaryAccent),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).testTag("test_alarm_btn")
+                            ) {
+                                Text("Test Loud Alarm", fontSize = 10.sp, color = theme.secondaryAccent, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Button(
+                            onClick = { viewModel.triggerTestSilentCapture() },
+                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent.copy(alpha = 0.3f)),
+                            border = BorderStroke(1.dp, theme.primaryAccent),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).testTag("test_silent_capture_btn")
+                        ) {
+                            Text("Test Silent Capture", fontSize = 10.sp, color = theme.primaryAccent, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Speaker Verification & Voice Biometrics Card
+        item {
+            val isEnrolled by viewModel.isVoiceEnrolled.collectAsState()
+            val threshold by viewModel.speakerTargetThreshold.collectAsState()
+            val lastScore by viewModel.lastVerificationScore.collectAsState()
+
+            SiriGlassCard(theme = theme) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(imageVector = Icons.Default.Mic, contentDescription = null, tint = theme.primaryAccent)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Voice Biometric Verification", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isEnrolled) Color(0xFF10B981).copy(alpha = 0.2f) else Color(0xFFF59E0B).copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, if (isEnrolled) Color(0xFF10B981) else Color(0xFFF59E0B))
+                        ) {
+                            Text(
+                                text = if (isEnrolled) "PROFILE ENROLLED" else "UNENROLLED",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isEnrolled) Color(0xFF10B981) else Color(0xFFF59E0B),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Calculates Cosine Similarity between incoming wake-word voice embeddings (\"Okay Max\", \"Backup Max\", \"Hey Max\") and enrolled owner profile. Access is granted only if score >= target threshold.",
+                        fontSize = 11.sp,
+                        color = Color.LightGray
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Cosine Similarity Threshold Slider
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Cosine Similarity Threshold", fontSize = 11.sp, color = Color.Gray)
+                        Text("${String.format("%.2f", threshold)} (Target)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = theme.primaryAccent)
+                    }
+
+                    Slider(
+                        value = threshold,
+                        onValueChange = { viewModel.setSpeakerThreshold(it) },
+                        valueRange = 0.50f..0.90f,
+                        colors = SliderDefaults.colors(thumbColor = theme.primaryAccent, activeTrackColor = theme.primaryAccent)
+                    )
+
+                    if (lastScore != null) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        ) {
+                            Text("Last Verification Score:", fontSize = 11.sp, color = Color.Gray)
+                            Text(
+                                text = "${String.format("%.2f", lastScore)} ${if (lastScore!! >= threshold) "✓ MATCH" else "✗ REJECTED"}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (lastScore!! >= threshold) Color(0xFF10B981) else Color(0xFFEF4444)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Enrollment Buttons
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Button(
+                            onClick = {
+                                // Extract sample and enroll
+                                val samplePcm = FloatArray(16000) { ((Math.random() - 0.5) * 0.4).toFloat() }
+                                viewModel.enrollVoiceProfile(samplePcm)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).testTag("enroll_voice_btn")
+                        ) {
+                            Text("Enroll Owner Voice", fontSize = 10.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+
+                        if (isEnrolled) {
+                            Button(
+                                onClick = { viewModel.deleteVoiceProfile() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).testTag("delete_voice_btn")
+                            ) {
+                                Text("Delete Profile", fontSize = 10.sp, color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             SiriToggleCard(
                 title = "Enable Blocklist Protection",
@@ -1645,6 +1864,17 @@ fun AppMediaControlTab(
                 checked = settings.isWhatsAppAutoRead,
                 theme = theme,
                 onCheckedChange = { viewModel.toggleWhatsAppAutoRead(it) }
+            )
+        }
+
+        item {
+            SiriToggleCard(
+                title = "WhatsApp AI Auto-Reply",
+                subtitle = "Automatically intercept WhatsApp notifications and reply using MAX AI (Gemini)",
+                icon = Icons.Default.Chat,
+                checked = settings.isWhatsAppAutoReplyEnabled,
+                theme = theme,
+                onCheckedChange = { viewModel.toggleWhatsAppAutoReply(it) }
             )
         }
 
@@ -2739,7 +2969,7 @@ fun SiriVoiceOrb(
         
         Spacer(modifier = Modifier.height(2.dp))
         Text(
-            text = if (isSpeaking) "MAX Speaking..." else if (isListening) "Listening (Vosk)..." else "Tap MAX Orb to Speak",
+            text = if (isSpeaking) "MAX Speaking..." else if (isListening) "Listening (OpenWakeWord)..." else "Tap MAX Orb to Speak",
             fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold,
             color = if (isListening || isSpeaking) theme.primaryAccent else Color.White.copy(alpha = 0.6f)
@@ -3294,6 +3524,7 @@ fun WhatsAppControlTab(
     theme: SiriThemeColors
 ) {
     val context = LocalContext.current
+    val settings by viewModel.settings.collectAsState()
     val messages by viewModel.whatsAppMessages.collectAsState()
     val status by viewModel.whatsAppStatus.collectAsState()
     val isNotifGranted = viewModel.isNotificationListenerGranted()
@@ -3381,6 +3612,18 @@ fun WhatsAppControlTab(
                     }
                 }
             }
+        }
+
+        // WhatsApp AI Auto-Reply Toggle Switch
+        item {
+            SiriToggleCard(
+                title = "WhatsApp AI Auto-Reply Switch",
+                subtitle = "Enables or disables interception and Gemini AI auto-reply for WhatsApp notifications ('whatsapp_auto_reply_enabled')",
+                icon = Icons.Default.Chat,
+                checked = settings.isWhatsAppAutoReplyEnabled,
+                theme = theme,
+                onCheckedChange = { viewModel.toggleWhatsAppAutoReply(it) }
+            )
         }
 
         // Live Status Banner

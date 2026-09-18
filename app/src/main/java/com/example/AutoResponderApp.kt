@@ -60,7 +60,13 @@ class AutoResponderApp : Application() {
     lateinit var appLauncherManager: com.example.launcher.AppLauncherManager
         private set
 
-    lateinit var voskWakeWordDetector: com.example.voice.VoskWakeWordDetector
+    lateinit var openWakeWordDetector: com.example.voice.OpenWakeWordDetector
+        private set
+
+    lateinit var intruderSecurityManager: com.example.security.IntruderSecurityManager
+        private set
+
+    lateinit var speakerVerificationManager: com.example.biometrics.SpeakerVerificationManager
         private set
 
     override fun onCreate() {
@@ -82,7 +88,9 @@ class AutoResponderApp : Application() {
         emergencySosManager = com.example.sos.EmergencySosManager.getInstance(this)
         maxCameraManager = com.example.camera.MaxCameraManager.getInstance(this)
         appLauncherManager = com.example.launcher.AppLauncherManager(this)
-        voskWakeWordDetector = com.example.voice.VoskWakeWordDetector(this)
+        openWakeWordDetector = com.example.voice.OpenWakeWordDetector(this)
+        intruderSecurityManager = com.example.security.IntruderSecurityManager.getInstance(this)
+        speakerVerificationManager = com.example.biometrics.SpeakerVerificationManager.getInstance(this)
     }
 
     companion object {

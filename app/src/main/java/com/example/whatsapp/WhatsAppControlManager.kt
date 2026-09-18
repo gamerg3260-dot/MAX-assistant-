@@ -39,7 +39,7 @@ class WhatsAppControlManager private constructor() {
         packageName: String,
         notificationKey: String,
         replyAction: Notification.Action?
-    ) {
+    ): WhatsAppMessage {
         val msgId = "${packageName}_${System.currentTimeMillis()}"
         val msg = WhatsAppMessage(
             id = msgId,
@@ -60,6 +60,7 @@ class WhatsAppControlManager private constructor() {
         _messages.value = currentList.take(30) // keep last 30 messages
         _lastInterceptedStatus.value = "New WhatsApp msg from $sender: \"$text\""
         Log.i(tag, "Intercepted WhatsApp message from $sender: $text")
+        return msg
     }
 
     /**

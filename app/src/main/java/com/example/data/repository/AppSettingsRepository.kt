@@ -40,6 +40,7 @@ data class AppSettings(
 
     // App & Media Control Settings (YouTube, WhatsApp)
     val isWhatsAppAutoRead: Boolean = true,
+    val isWhatsAppAutoReplyEnabled: Boolean = true,
     val isYouTubeMediaAutoPause: Boolean = true,
     val isSpotifyAutoDucking: Boolean = true,
 
@@ -94,6 +95,7 @@ class AppSettingsRepository(context: Context) {
             isProximitySensorSilence = prefs.getBoolean("is_proximity_sensor_silence", true),
 
             isWhatsAppAutoRead = prefs.getBoolean("is_whatsapp_auto_read", true),
+            isWhatsAppAutoReplyEnabled = prefs.getBoolean("whatsapp_auto_reply_enabled", true),
             isYouTubeMediaAutoPause = prefs.getBoolean("is_youtube_media_auto_pause", true),
             isSpotifyAutoDucking = prefs.getBoolean("is_spotify_auto_ducking", true),
 
@@ -140,6 +142,7 @@ class AppSettingsRepository(context: Context) {
             putBoolean("is_proximity_sensor_silence", newSettings.isProximitySensorSilence)
 
             putBoolean("is_whatsapp_auto_read", newSettings.isWhatsAppAutoRead)
+            putBoolean("whatsapp_auto_reply_enabled", newSettings.isWhatsAppAutoReplyEnabled)
             putBoolean("is_youtube_media_auto_pause", newSettings.isYouTubeMediaAutoPause)
             putBoolean("is_spotify_auto_ducking", newSettings.isSpotifyAutoDucking)
 
@@ -241,6 +244,10 @@ class AppSettingsRepository(context: Context) {
 
     fun setWhatsAppAutoRead(enabled: Boolean) {
         updateSettings(_settings.value.copy(isWhatsAppAutoRead = enabled))
+    }
+
+    fun setWhatsAppAutoReplyEnabled(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isWhatsAppAutoReplyEnabled = enabled))
     }
 
     fun setYouTubeMediaAutoPause(enabled: Boolean) {
