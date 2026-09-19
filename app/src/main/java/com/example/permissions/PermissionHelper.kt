@@ -25,6 +25,8 @@ object PermissionHelper {
                 Manifest.permission.READ_CONTACTS,
                 Manifest.permission.RECORD_AUDIO,
                 Manifest.permission.MODIFY_AUDIO_SETTINGS,
+                Manifest.permission.CAMERA,
+                Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.RECEIVE_SMS,
                 Manifest.permission.SEND_SMS,
                 Manifest.permission.READ_SMS
@@ -83,6 +85,8 @@ object PermissionHelper {
             Manifest.permission.SEND_SMS -> "Send SMS (SMS Auto-Reply)"
             Manifest.permission.READ_SMS -> "Read SMS (Process SMS Context)"
             Manifest.permission.MODIFY_AUDIO_SETTINGS -> "Modify Audio (Audio Focus Management)"
+            Manifest.permission.CAMERA -> "Front Camera Access (Silent Intruder Selfie Capture)"
+            Manifest.permission.ACCESS_FINE_LOCATION -> "Precise GPS Location (Emergency SOS Broadcast)"
             else -> permission.substringAfterLast(".")
         }
     }

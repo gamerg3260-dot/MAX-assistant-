@@ -71,6 +71,8 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val failedUnlockCount: StateFlow<Int> = intruderSecurityManager.failedUnlockCount
     val lastFailedTimestamp: StateFlow<Long?> = intruderSecurityManager.lastFailedTimestamp
     val isAlarmRinging: StateFlow<Boolean> = intruderSecurityManager.isAlarmRinging
+    val isMotionArmed: StateFlow<Boolean> = intruderSecurityManager.isMotionArmed
+    val lastSecurityStatus: StateFlow<String> = intruderSecurityManager.lastSecurityStatus
     val capturedIntruderImages: StateFlow<List<java.io.File>> = intruderSecurityManager.capturedIntruderImages
 
     val isVoiceEnrolled: StateFlow<Boolean> = speakerVerificationManager.isVoiceEnrolled
@@ -1486,16 +1488,37 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    fun triggerTestSecurityAlarm() {
-        intruderSecurityManager.triggerLoudAlarm()
+    fun triggerTestSecurityAlarm(reason: String = "Manual User Test") {
+        intruderSecurityManager.triggerLoudAlarm(reason)
     }
 
     fun stopSecurityAlarm() {
         intruderSecurityManager.stopLoudAlarm()
     }
 
-    fun triggerTestSilentCapture() {
-        intruderSecurityManager.captureSilentFrontCameraSnapshot()
+    fun triggerTestSilentCapture(reason: String = "Manual User Test") {
+        intruderSecurityManager.captureSilentFrontCameraSnapshot(reason)
+    }
+
+    fun setAntiTheftSirenEnabled(enabled: Boolean) {
+        settingsRepo.setAntiTheftSirenEnabled(enabled)
+    }
+
+    fun setIntruderSelfieCaptureEnabled(enabled: Boolean) {
+        settingsRepo.setIntruderSelfieCaptureEnabled(enabled)
+    }
+
+    fun setMotionDetectionAlarmEnabled(enabled: Boolean) {
+        settingsRepo.setMotionDetectionAlarmEnabled(enabled)
+        intruderSecurityManager.setMotionDetectionArmed(enabled)
+    }
+
+    fun setFailedUnlockThreshold(threshold: Int) {
+        settingsRepo.setFailedUnlockThreshold(threshold)
+    }
+
+    fun deleteIntruderImage(file: java.io.File) {
+        intruderSecurityManager.deleteIntruderImage(file)
     }
 
     fun clearIntruderLogs() {

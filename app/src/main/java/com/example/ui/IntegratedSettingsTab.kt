@@ -3,6 +3,10 @@ package com.example.ui
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import android.util.Log
+import com.example.data.repository.AppSettings
+import com.example.toggle.SoundMode
+import com.example.permissions.PermissionHelper
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -97,9 +101,22 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.repository.AppSettings
-import com.example.permissions.PermissionHelper
-import com.example.toggle.SoundMode
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import android.graphics.BitmapFactory
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Nested Navigation Screens for MAX Assistant Settings
@@ -331,11 +348,12 @@ private fun MainSettingsScreen(
         // --- CATEGORY CARD 3: SECURITY & SOS ---
         CategoryNavigationCard(
             title = "Security & SOS",
-            subtitle = "Voice ID, PIN Protection, SOS Emergency Contacts & GPS Broadcast",
+            subtitle = "Loud Anti-Theft Siren, Intruder Selfie Capture, Voice ID & Emergency SOS",
             badges = listOf(
-                if (settings.isVoiceIdEnabled) "Voice ID Active" else "Voice ID Off",
-                if (settings.isPinRequiredForActions) "PIN Protected" else "PIN Off",
-                if (settings.isSosLocationBroadcast) "GPS Broadcast On" else "GPS Broadcast Off"
+                if (settings.isAntiTheftSirenEnabled) "Loud Siren Active" else "Siren Off",
+                if (settings.isIntruderSelfieCaptureEnabled) "Intruder Selfie On" else "Selfie Off",
+                if (settings.isMotionDetectionAlarmEnabled) "Motion Sensor Armed" else "Motion Standby",
+                if (settings.isVoiceIdEnabled) "Voice ID Active" else "Voice ID Off"
             ),
             icon = Icons.Default.Security,
             iconTint = Color(0xFFFF5252),
@@ -1478,13 +1496,118 @@ private fun SecuritySosSettingsSubScreen(
     onBack: () -> Unit,
     onRequestPermissions: () -> Unit
 ) {
+    val context = LocalContext.current
     val sosContacts by viewModel.emergencySosManager.sosContacts.collectAsState()
-    val sosStatus by viewModel.emergencySosManager.lastSosStatus.collectAsState()
-    val isDispatching by viewModel.emergencySosManager.isDispatching.collectAsState()
+    val isAlarmRinging by viewModel.isAlarmRinging.collectAsState()
+    val isMotionArmed by viewModel.isMotionArmed.collectAsState()
+    val capturedImages by viewModel.capturedIntruderImages.collectAsState()
+    val failedUnlockCount by viewModel.failedUnlockCount.collectAsState()
+    val lastFailedTimestamp by viewModel.lastFailedTimestamp.collectAsState()
+    val lastSecurityStatus by viewModel.lastSecurityStatus.collectAsState()
 
     var newContactNumber by remember { mutableStateOf("") }
     var pinInput by remember(settings.securityPin) { mutableStateOf(settings.securityPin) }
     var customSosMessageInput by remember(settings.sosAlertMessage) { mutableStateOf(settings.sosAlertMessage) }
+    var selectedImageForDialog by remember { mutableStateOf<File?>(null) }
+    var testCaptureMessage by remember { mutableStateOf<String?>(null) }
+
+    // Dialog for viewing captured intruder photograph
+    if (selectedImageForDialog != null) {
+        val file = selectedImageForDialog!!
+        val bitmap = remember(file.absolutePath) {
+            BitmapFactory.decodeFile(file.absolutePath)
+        }
+        val formattedDate = remember(file.lastModified()) {
+            SimpleDateFormat("EEE, MMM dd, yyyy - hh:mm:ss a", Locale.getDefault()).format(Date(file.lastModified()))
+        }
+
+        Dialog(onDismissRequest = { selectedImageForDialog = null }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF14141E))
+                    .border(1.dp, Color(0xFFFF5252).copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                    .padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.CameraAlt, contentDescription = "Photo", tint = Color(0xFFFF5252), modifier = Modifier.size(18.dp))
+                            Text("Intruder Snapshot", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                        IconButton(onClick = { selectedImageForDialog = null }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Intruder capture photo",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(260.dp)
+                                .clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(180.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.05f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Unable to preview image file", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Captured: $formattedDate", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        Text("File: ${file.name}", color = Color.Gray, fontSize = 10.sp)
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                viewModel.deleteIntruderImage(file)
+                                selectedImageForDialog = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252).copy(alpha = 0.2f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Delete Photo", color = Color(0xFFFF5252), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { selectedImageForDialog = null },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Dismiss", color = Color.White, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1497,106 +1620,283 @@ private fun SecuritySosSettingsSubScreen(
         // Navigation Top Bar
         SubScreenTopBar(
             title = "Security & SOS Settings",
-            subtitle = "Voice ID, Security PIN, Emergency Contacts & Location Broadcast",
+            subtitle = "Anti-Theft Siren, Intruder Selfie, Voice ID & Emergency SOS",
             theme = theme,
             onBack = onBack
         )
 
-        // --- 1. VOICE ID & ACCESS CONTROL ---
+        // --- ACTIVE SIREN ALERT BANNER (If alarm is ringing) ---
+        if (isAlarmRinging) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFFF1744).copy(alpha = 0.25f))
+                    .border(1.5.dp, Color(0xFFFF1744), RoundedCornerShape(14.dp))
+                    .padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF1744)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.NotificationsActive, contentDescription = "Alarm Active", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("THEFT SIREN ACTIVATED!", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                            Text("High-decibel alarm sounding at maximum volume", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
+                        }
+                    }
+
+                    Button(
+                        onClick = { viewModel.stopSecurityAlarm() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.VolumeMute, contentDescription = "Silence", tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("SILENCE & RESET ALARM", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // --- 1. ACTIVE THEFT PROTECTION & INTRUDER SENTINEL ---
         SiriGlassCard(theme = theme) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text(
-                    text = "Access Control & Biometrics",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF5252).copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Shield, contentDescription = "Shield", tint = Color(0xFFFF5252), modifier = Modifier.size(18.dp))
+                        }
+                        Column {
+                            Text("Theft Defense & Intruder Sentinel", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("Active anti-theft siren & silent background snapshot", fontSize = 10.sp, color = Color.White.copy(alpha = 0.6f))
+                        }
+                    }
+                }
 
-                // Voice ID Toggle
+                // Status Strip
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "Sentinel Status: $lastSecurityStatus", fontSize = 10.sp, color = Color.White.copy(alpha = 0.75f), maxLines = 1)
+                        if (failedUnlockCount > 0) {
+                            Text(text = "$failedUnlockCount Failed Unlock Attempts", fontSize = 10.sp, color = Color(0xFFFFB300), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // TOGGLE 1: Loud Anti-Theft Siren
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable { viewModel.setVoiceIdEnabled(!settings.isVoiceIdEnabled) }
+                        .clickable { viewModel.setAntiTheftSirenEnabled(!settings.isAntiTheftSirenEnabled) }
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text("Voice ID Biometric Lock", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                        Text("Only allow verified owner voiceprint to trigger system toggles and calls", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                        Text("Loud Anti-Theft Siren", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Text("Overrides silent/vibrate modes to blast high-pitched 120dB alarm on security triggers", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
                     }
                     Switch(
-                        checked = settings.isVoiceIdEnabled,
-                        onCheckedChange = { viewModel.setVoiceIdEnabled(it) },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = theme.primaryAccent)
+                        checked = settings.isAntiTheftSirenEnabled,
+                        onCheckedChange = { viewModel.setAntiTheftSirenEnabled(it) },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color(0xFFFF5252))
                     )
+                }
+
+                // Test Siren Action Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isAlarmRinging) {
+                        Button(
+                            onClick = { viewModel.stopSecurityAlarm() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.VolumeMute, contentDescription = "Stop", tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Stop Siren Alarm", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Button(
+                            onClick = { viewModel.triggerTestSecurityAlarm("User Test") },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.12f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.VolumeUp, contentDescription = "Test Siren", tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Sound Test Siren", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
                 }
 
                 Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
 
-                // PIN Requirement Toggle
+                // TOGGLE 2: Intruder Selfie Camera Capture
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable { viewModel.setPinRequiredForActions(!settings.isPinRequiredForActions) }
+                        .clickable { viewModel.setIntruderSelfieCaptureEnabled(!settings.isIntruderSelfieCaptureEnabled) }
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text("Require PIN for Sensitive Actions", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                        Text("Prompts for 4-digit PIN before calling unknown contacts or modifying settings", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                        Text("Intruder Selfie Photo Capture", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Text("Silently snaps front camera photo in background without showing preview or flash", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
                     }
                     Switch(
-                        checked = settings.isPinRequiredForActions,
-                        onCheckedChange = { viewModel.setPinRequiredForActions(it) },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = theme.secondaryAccent)
+                        checked = settings.isIntruderSelfieCaptureEnabled,
+                        onCheckedChange = { viewModel.setIntruderSelfieCaptureEnabled(it) },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = theme.primaryAccent)
                     )
                 }
 
-                if (settings.isPinRequiredForActions) {
+                if (settings.isIntruderSelfieCaptureEnabled) {
+                    // Trigger Threshold Choice
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Failed Unlock Trigger Threshold", fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f), fontWeight = FontWeight.Medium)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(1, 2, 3).forEach { threshold ->
+                                val isSelected = settings.failedUnlockThreshold == threshold
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) theme.primaryAccent.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.06f))
+                                        .border(1.dp, if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                        .clickable { viewModel.setFailedUnlockThreshold(threshold) }
+                                        .padding(vertical = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "$threshold Failed ${if (threshold == 1) "Attempt" else "Attempts"}",
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.8f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Test Silent Snapshot Button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedTextField(
-                            value = pinInput,
-                            onValueChange = { if (it.length <= 6) pinInput = it },
-                            label = { Text("Security PIN", color = Color.Gray, fontSize = 11.sp) },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            visualTransformation = PasswordVisualTransformation(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = theme.secondaryAccent,
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(10.dp)
-                        )
-
                         Button(
-                            onClick = { viewModel.setSecurityPin(pinInput) },
-                            colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent),
-                            shape = RoundedCornerShape(10.dp)
+                            onClick = {
+                                testCaptureMessage = "Snapping silent front photo..."
+                                viewModel.intruderSecurityManager.captureSilentFrontCameraSnapshot(reason = "Manual Test") { file ->
+                                    testCaptureMessage = if (file != null) "Silent snapshot captured and saved!" else "Camera permission or hardware error."
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent.copy(alpha = 0.2f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(vertical = 8.dp)
                         ) {
-                            Text("Save PIN", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Icon(Icons.Default.CameraAlt, contentDescription = "Test Camera", tint = theme.primaryAccent, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Test Silent Intruder Snapshot", color = theme.primaryAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
+
+                    testCaptureMessage?.let { msg ->
+                        Text(text = msg, fontSize = 10.sp, color = theme.primaryAccent, modifier = Modifier.padding(start = 4.dp))
+                    }
+                }
+
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+
+                // TOGGLE 3: Motion & Pickpocket Sensor
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { viewModel.setMotionDetectionAlarmEnabled(!settings.isMotionDetectionAlarmEnabled) }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Motion / Pickpocket Sensor", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isMotionArmed) Color(0xFF00E676).copy(alpha = 0.2f) else Color.White.copy(alpha = 0.1f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (isMotionArmed) "ARMED" else "OFF",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isMotionArmed) Color(0xFF00E676) else Color.Gray
+                                )
+                            }
+                        }
+                        Text("Sounds siren and snaps photo if phone is abruptly moved or grabbed while armed", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                    }
+                    Switch(
+                        checked = settings.isMotionDetectionAlarmEnabled,
+                        onCheckedChange = { viewModel.setMotionDetectionAlarmEnabled(it) },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = theme.secondaryAccent)
+                    )
                 }
             }
         }
 
-        // --- 2. SOS EMERGENCY CONTACTS SETUP ---
+        // --- 2. INTRUDER PHOTO LOGS & EVIDENCE GALLERY ---
         SiriGlassCard(theme = theme) {
             Column(
                 modifier = Modifier
@@ -1609,110 +1909,103 @@ private fun SecuritySosSettingsSubScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = "Emergency SOS Contacts",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = "Gallery", tint = theme.primaryAccent, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "Intruder Evidence Gallery",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    if (capturedImages.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFFF5252).copy(alpha = 0.2f))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "${capturedImages.size} Snapped",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFFF5252)
+                                )
+                            }
+                            IconButton(onClick = { viewModel.clearIntruderLogs() }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Delete, contentDescription = "Clear All", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+
+                if (capturedImages.isEmpty()) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFFFF5252).copy(alpha = 0.2f))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.04f))
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "${sosContacts.size} Registered",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFFF5252)
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = "Clean", tint = Color(0xFF00E676), modifier = Modifier.size(24.dp))
+                            Text("No unauthorized intruder attempts detected", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                            Text("Photos captured upon failed unlock or theft motion will appear here.", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                        }
                     }
-                }
-
-                // Add Contact Input
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = newContactNumber,
-                        onValueChange = { newContactNumber = it },
-                        placeholder = { Text("Enter phone number...", color = Color.Gray, fontSize = 12.sp) },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFFFF5252),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-
-                    Button(
-                        onClick = {
-                            if (newContactNumber.isNotBlank()) {
-                                viewModel.emergencySosManager.addSosContact(newContactNumber)
-                                newContactNumber = ""
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = "Add", tint = Color.White, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
-                }
-
-                // Contact List Items
-                if (sosContacts.isEmpty()) {
-                    Text(
-                        text = "No emergency contacts configured yet. Add trusted phone numbers to receive automated SOS alerts.",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.5f)
-                    )
                 } else {
-                    sosContacts.forEach { contact ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White.copy(alpha = 0.05f))
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Phone,
-                                    contentDescription = "Contact",
-                                    tint = Color(0xFFFF5252),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = contact,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color.White
-                                )
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(capturedImages) { imgFile ->
+                            val bmp = remember(imgFile.absolutePath) {
+                                BitmapFactory.decodeFile(imgFile.absolutePath)
+                            }
+                            val dateStr = remember(imgFile.lastModified()) {
+                                SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(imgFile.lastModified()))
                             }
 
-                            IconButton(
-                                onClick = { viewModel.emergencySosManager.removeSosContact(contact) },
-                                modifier = Modifier.size(28.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 110.dp, height = 130.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .border(1.dp, Color(0xFFFF5252).copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                                    .clickable { selectedImageForDialog = imgFile }
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Remove",
-                                    tint = Color.Gray,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                if (bmp != null) {
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "Intruder snapshot",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.CameraAlt, contentDescription = "Photo", tint = Color.Gray)
+                                    }
+                                }
+
+                                // Date Overlay
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .background(Color.Black.copy(alpha = 0.75f))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = dateStr,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
@@ -1720,115 +2013,7 @@ private fun SecuritySosSettingsSubScreen(
             }
         }
 
-        // --- 3. BROADCAST OPTIONS ---
-        SiriGlassCard(theme = theme) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Emergency Broadcast Options",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-
-                // GPS Location Broadcast Switch
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { viewModel.setSosLocationBroadcast(!settings.isSosLocationBroadcast) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text("Live GPS Location Broadcast", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                        Text("Attaches Google Maps coordinates link inside emergency SOS alert", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
-                    }
-                    Switch(
-                        checked = settings.isSosLocationBroadcast,
-                        onCheckedChange = { viewModel.setSosLocationBroadcast(it) },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color(0xFFFF5252))
-                    )
-                }
-
-                // SMS Alert Broadcast Switch
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { viewModel.setSosSmsBroadcast(!settings.isSosSmsBroadcast) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text("Direct SMS Alert Dispatch", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                        Text("Dispatches emergency SMS to all registered contacts", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
-                    }
-                    Switch(
-                        checked = settings.isSosSmsBroadcast,
-                        onCheckedChange = { viewModel.setSosSmsBroadcast(it) },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color(0xFFFF5252))
-                    )
-                }
-
-                // Loud Siren Alert Switch
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { viewModel.setSosSirensBroadcast(!settings.isSosSirensBroadcast) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text("Loud Distress Beacon / Siren", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                        Text("Sounds high-volume audio alarm on device during SOS emergency", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
-                    }
-                    Switch(
-                        checked = settings.isSosSirensBroadcast,
-                        onCheckedChange = { viewModel.setSosSirensBroadcast(it) },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color(0xFFFF5252))
-                    )
-                }
-
-                // Custom Alert Message
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Emergency SMS Text Template", fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
-                    OutlinedTextField(
-                        value = customSosMessageInput,
-                        onValueChange = { customSosMessageInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFFFF5252),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        maxLines = 2
-                    )
-
-                    Button(
-                        onClick = { viewModel.setSosAlertMessage(customSosMessageInput) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.align(Alignment.End),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
-                    ) {
-                        Text("Save Template", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // --- 4. PERMISSIONS AUDIT & MANAGER ---
+        // --- 3. DEVICE ADMIN PERMISSIONS HOOK ---
         SiriGlassCard(theme = theme) {
             Column(
                 modifier = Modifier
@@ -1836,80 +2021,55 @@ private fun SecuritySosSettingsSubScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "System Permissions Audit",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                val isAdminActive = remember { viewModel.isDeviceAdminActive() }
 
-                PermissionHelper.REQUIRED_PERMISSIONS.forEach { perm ->
-                    val isGranted = !missingPermissions.contains(perm)
-                    val label = PermissionHelper.getPermissionLabel(perm)
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (isGranted) Color(0xFF00E676).copy(alpha = 0.08f)
-                                else Color(0xFFFFB300).copy(alpha = 0.12f)
-                            )
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = if (isGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
-                                contentDescription = if (isGranted) "Granted" else "Missing",
-                                tint = if (isGranted) Color(0xFF00E676) else Color(0xFFFFB300),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Lock, contentDescription = "Admin", tint = if (isAdminActive) Color(0xFF00E676) else Color(0xFFFFB300), modifier = Modifier.size(18.dp))
+                        Column {
+                            Text("Screen Lock Device Admin", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             Text(
-                                text = label,
-                                fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.85f),
-                                maxLines = 1
+                                if (isAdminActive) "Active: Intercepts lockscreen failed attempts"
+                                else "Inactive: Enable to detect wrong PIN / Pattern entries",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.65f)
                             )
                         }
+                    }
 
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isAdminActive) Color(0xFF00E676).copy(alpha = 0.2f) else Color(0xFFFFB300).copy(alpha = 0.2f))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
                         Text(
-                            text = if (isGranted) "GRANTED" else "REQUIRED",
+                            text = if (isAdminActive) "ACTIVE" else "ENABLE",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isGranted) Color(0xFF00E676) else Color(0xFFFFB300)
+                            color = if (isAdminActive) Color(0xFF00E676) else Color(0xFFFFB300)
                         )
                     }
                 }
 
-                if (missingPermissions.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                if (!isAdminActive) {
                     Button(
-                        onClick = onRequestPermissions,
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("settings_grant_all_permissions_btn")
+                        onClick = {
+                            try {
+                                context.startActivity(viewModel.getDeviceAdminEnableIntent())
+                            } catch (e: Exception) {
+                                Log.e("SecuritySubScreen", "Error launching device admin intent: ${e.message}")
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Security,
-                            contentDescription = "Grant",
-                            tint = Color.Black,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Grant ${missingPermissions.size} Missing Permissions",
-                            color = Color.Black,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
+                        Text("Activate Device Administrator", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
             }

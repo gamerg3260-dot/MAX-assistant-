@@ -60,10 +60,14 @@ data class AppSettings(
     val bassBoost: Float = 0.4f,
     val trebleBoost: Float = 0.6f,
 
-    // Security & Access Control Settings
+    // Security, Access Control & Theft Defense Settings
     val isVoiceIdEnabled: Boolean = true,
     val isPinRequiredForActions: Boolean = false,
     val securityPin: String = "1234",
+    val isAntiTheftSirenEnabled: Boolean = true,
+    val isIntruderSelfieCaptureEnabled: Boolean = true,
+    val isMotionDetectionAlarmEnabled: Boolean = false,
+    val failedUnlockThreshold: Int = 2,
     val isSosLocationBroadcast: Boolean = true,
     val isSosSmsBroadcast: Boolean = true,
     val isSosSirensBroadcast: Boolean = true,
@@ -138,6 +142,10 @@ class AppSettingsRepository(context: Context) {
             isVoiceIdEnabled = prefs.getBoolean("is_voice_id_enabled", true),
             isPinRequiredForActions = prefs.getBoolean("is_pin_required_for_actions", false),
             securityPin = prefs.getString("security_pin", "1234") ?: "1234",
+            isAntiTheftSirenEnabled = prefs.getBoolean("is_anti_theft_siren_enabled", true),
+            isIntruderSelfieCaptureEnabled = prefs.getBoolean("is_intruder_selfie_capture_enabled", true),
+            isMotionDetectionAlarmEnabled = prefs.getBoolean("is_motion_detection_alarm_enabled", false),
+            failedUnlockThreshold = prefs.getInt("failed_unlock_threshold", 2),
             isSosLocationBroadcast = prefs.getBoolean("is_sos_location_broadcast", true),
             isSosSmsBroadcast = prefs.getBoolean("is_sos_sms_broadcast", true),
             isSosSirensBroadcast = prefs.getBoolean("is_sos_sirens_broadcast", true),
@@ -208,6 +216,10 @@ class AppSettingsRepository(context: Context) {
             putBoolean("is_voice_id_enabled", newSettings.isVoiceIdEnabled)
             putBoolean("is_pin_required_for_actions", newSettings.isPinRequiredForActions)
             putString("security_pin", newSettings.securityPin)
+            putBoolean("is_anti_theft_siren_enabled", newSettings.isAntiTheftSirenEnabled)
+            putBoolean("is_intruder_selfie_capture_enabled", newSettings.isIntruderSelfieCaptureEnabled)
+            putBoolean("is_motion_detection_alarm_enabled", newSettings.isMotionDetectionAlarmEnabled)
+            putInt("failed_unlock_threshold", newSettings.failedUnlockThreshold)
             putBoolean("is_sos_location_broadcast", newSettings.isSosLocationBroadcast)
             putBoolean("is_sos_sms_broadcast", newSettings.isSosSmsBroadcast)
             putBoolean("is_sos_sirens_broadcast", newSettings.isSosSirensBroadcast)
@@ -426,6 +438,22 @@ class AppSettingsRepository(context: Context) {
 
     fun setSecurityPin(pin: String) {
         updateSettings(_settings.value.copy(securityPin = pin))
+    }
+
+    fun setAntiTheftSirenEnabled(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isAntiTheftSirenEnabled = enabled))
+    }
+
+    fun setIntruderSelfieCaptureEnabled(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isIntruderSelfieCaptureEnabled = enabled))
+    }
+
+    fun setMotionDetectionAlarmEnabled(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isMotionDetectionAlarmEnabled = enabled))
+    }
+
+    fun setFailedUnlockThreshold(threshold: Int) {
+        updateSettings(_settings.value.copy(failedUnlockThreshold = threshold))
     }
 
     fun setSosLocationBroadcast(enabled: Boolean) {
