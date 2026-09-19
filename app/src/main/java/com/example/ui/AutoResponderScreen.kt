@@ -1048,7 +1048,7 @@ fun ThreeSectionNavigationBar(
 ) {
     val sections = listOf(
         Triple("Voice AI", "Calls & Announcer", Icons.Default.RecordVoiceOver),
-        Triple("Hardware System", "Toggles & Media", Icons.Default.Tune),
+        Triple("Hardware", "Toggles & Media", Icons.Default.Tune),
         Triple("Security & SOS", "Settings & Safety", Icons.Default.Security)
     )
 
@@ -1062,7 +1062,7 @@ fun ThreeSectionNavigationBar(
             val isSelected = selectedSection == index
             val testTag = when (index) {
                 0 -> "nav_tab_voice_ai"
-                1 -> "nav_tab_hardware_system"
+                1 -> "nav_tab_hardware"
                 else -> "nav_tab_security_sos"
             }
             Box(
