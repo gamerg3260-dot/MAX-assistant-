@@ -1284,7 +1284,7 @@ fun VoiceCallAnnouncerTab(
                             Icon(imageVector = Icons.Default.RecordVoiceOver, contentDescription = null, tint = theme.primaryAccent)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Swara Native Voice TTS Engine",
+                                text = "MAX Native TTS Engine (Hindi - India)",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -1320,7 +1320,7 @@ fun VoiceCallAnnouncerTab(
 
                     Button(
                         onClick = {
-                            viewModel.testSwaraVoice(
+                            viewModel.testMaxNativeTts(
                                 text = sampleText
                             ) { status ->
                                 ttsResultStatus = status
@@ -1330,11 +1330,11 @@ fun VoiceCallAnnouncerTab(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("test_swara_tts_btn")
+                            .testTag("test_max_native_tts_btn")
                     ) {
-                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Play Swara Voice", tint = Color.Black)
+                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Play Native Voice", tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Play Swara Native Voice TTS", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Play MAX Native TTS (Hindi - India)", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -3454,7 +3454,7 @@ fun ApiKeyConfigDialog(
     val validationStatus by viewModel.geminiValidationStatus.collectAsState()
     val settings by viewModel.settings.collectAsState()
 
-    var activeTab by remember { mutableIntStateOf(1) } // 0 = Swara Voice, 1 = AI Engine & Models
+    var activeTab by remember { mutableIntStateOf(1) } // 0 = MAX Native TTS, 1 = AI Engine & Models
     var inputKey by remember(currentApiKey) { mutableStateOf(currentApiKey) }
 
     // Auto-detect provider in real time from inputKey or fallback to active provider in settings
@@ -3514,7 +3514,7 @@ fun ApiKeyConfigDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
             ) {
-                // Tab selector for AI Engine vs Swara Voice
+                // Tab selector for AI Engine vs MAX Native TTS
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3544,7 +3544,7 @@ fun ApiKeyConfigDialog(
                     FilterChip(
                         selected = activeTab == 0,
                         onClick = { activeTab = 0 },
-                        label = { Text("Swara Voice TTS", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        label = { Text("MAX Native TTS", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.RecordVoiceOver,
@@ -3563,9 +3563,9 @@ fun ApiKeyConfigDialog(
                 }
 
                 if (activeTab == 0) {
-                    // Swara Native Voice Section
+                    // MAX Native TTS (Hindi India) Section
                     Text(
-                        "MAX Assistant uses Android's native Text-to-Speech engine configured with the 'Swara' voice for instant, zero-latency, offline-capable Hindi & English speech output.",
+                        "MAX Assistant uses Android's native Text-to-Speech engine configured for Hindi (India) [hi-IN] for instant, zero-latency, offline-capable speech output.",
                         fontSize = 12.sp,
                         color = Color.LightGray
                     )
@@ -3593,7 +3593,7 @@ fun ApiKeyConfigDialog(
 
                     Button(
                         onClick = {
-                            viewModel.testSwaraVoice("नमस्ते! मैं मैक्स हूँ। मैं आपकी सहायता के लिए तैयार हूँ।") { status ->
+                            viewModel.testMaxNativeTts("नमस्ते! मैं मैक्स हूँ। मैं आपकी सहायता के लिए तैयार हूँ।") { status ->
                                 testStatusText = status
                             }
                         },
@@ -3601,11 +3601,11 @@ fun ApiKeyConfigDialog(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("test_swara_voice_btn")
+                            .testTag("test_max_native_voice_btn")
                     ) {
                         Icon(imageVector = Icons.Default.RecordVoiceOver, contentDescription = "Test Voice", tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Test Swara Native Voice", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Test MAX Native TTS (Hindi India)", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 } else {
                     // 1. AUTO-DETECT API PROVIDER & KEY ENTRY

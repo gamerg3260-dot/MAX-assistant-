@@ -11,14 +11,14 @@ sealed class ElevenLabsResult {
 }
 
 /**
- * Service for generating natural speech using Android's native Swara Text-to-Speech engine.
- * Maintained as a compatibility adapter over SwaraTtsService.
+ * Service for generating natural speech using Android's native MAX Native Text-to-Speech engine.
+ * Maintained as a compatibility adapter over MAXNativeTTS.
  */
 class ElevenLabsTtsService(private val context: Context) {
-    private val tag = "SwaraTtsAdapter"
-    private val swaraTts = SwaraTtsService(context)
+    private val tag = "MAXNativeTTSAdapter"
+    private val nativeTts = MAXNativeTTS(context)
 
-    val isPlayingAudio: StateFlow<Boolean> = swaraTts.isSpeaking
+    val isPlayingAudio: StateFlow<Boolean> = nativeTts.isSpeaking
 
     fun speak(
         text: String,
@@ -26,7 +26,7 @@ class ElevenLabsTtsService(private val context: Context) {
         speechPitch: Float = 1.0f,
         onCompletion: (() -> Unit)? = null
     ) {
-        swaraTts.speak(
+        nativeTts.speak(
             text = text,
             speechRate = speechRate,
             speechPitch = speechPitch,
@@ -36,13 +36,13 @@ class ElevenLabsTtsService(private val context: Context) {
 
     suspend fun generateSpeech(
         text: String,
-        voiceId: String = "swara_voice",
-        modelId: String = "native_swara",
+        voiceId: String = "hindi_voice",
+        modelId: String = "native_tts",
         apiKeyOverride: String? = null
     ): ElevenLabsResult {
-        // Direct speak with native Swara TTS
-        swaraTts.speak(text)
-        val dummyFile = File(context.cacheDir, "swara_tts.mp3")
+        // Direct speak with Android native TTS engine
+        nativeTts.speak(text)
+        val dummyFile = File(context.cacheDir, "native_tts.mp3")
         return ElevenLabsResult.Success(dummyFile)
     }
 
@@ -51,7 +51,11 @@ class ElevenLabsTtsService(private val context: Context) {
     }
 
     fun stopAudio() {
-        swaraTts.stop()
+        nativeTts.stop()
+    }
+
+    fun shutdown() {
+        nativeTts.shutdown()
     }
 }
 

@@ -61,7 +61,8 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val voiceDetector = app.voiceCommandDetector
     val audioManagerHelper = app.audioManagerHelper
     val callController = app.callController
-    val swaraTtsService = app.swaraTtsService
+    val maxNativeTTS = app.maxNativeTTS
+    val swaraTtsService get() = maxNativeTTS
     val appLauncherManager = app.appLauncherManager
     val directCallManager = app.directCallManager
     val intruderSecurityManager = app.intruderSecurityManager
@@ -215,10 +216,10 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
     val isTtsSpeaking: StateFlow<Boolean> = combine(
         announcer.isSpeaking,
-        swaraTtsService.isSpeaking,
+        maxNativeTTS.isSpeaking,
         _isVoiceOrbSpeaking
-    ) { speakingTts, speakingSwara, speakingOrb ->
-        speakingTts || speakingSwara || speakingOrb
+    ) { speakingTts, speakingNative, speakingOrb ->
+        speakingTts || speakingNative || speakingOrb
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
@@ -551,22 +552,29 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         _voiceOrbStatus.value = "Tap MAX Voice Orb to speak"
     }
 
+    fun testMaxNativeTts(
+        text: String = "नमस्ते! मैं मैक्स हूँ। मैं आपकी क्या मदद कर सकता हूँ?",
+        onResult: (String) -> Unit
+    ) {
+        onResult("Speaking via MAX Native TTS (Hindi India)...")
+        maxNativeTTS.speak(text) {
+            onResult("MAX Native TTS voice playback completed!")
+        }
+    }
+
     fun testSwaraVoice(
         text: String = "नमस्ते! मैं मैक्स हूँ। मैं आपकी क्या मदद कर सकता हूँ?",
         onResult: (String) -> Unit
     ) {
-        onResult("Speaking via Swara Native TTS Voice...")
-        swaraTtsService.speak(text) {
-            onResult("Swara voice playback completed!")
-        }
+        testMaxNativeTts(text, onResult)
     }
 
     fun testElevenLabsVoice(
         text: String = "नमस्ते! मैं मैक्स हूँ। मैं आपकी क्या मदद कर सकता हूँ?",
-        voiceId: String = "swara_voice",
+        voiceId: String = "hindi_voice",
         onResult: (String) -> Unit
     ) {
-        testSwaraVoice(text, onResult)
+        testMaxNativeTts(text, onResult)
     }
 
     fun clearHistory() {
@@ -776,9 +784,9 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                     fullText += chunk
                     _latestAssistantResponse.value = fullText
                     _voiceOrbStatus.value = "MAX: $fullText"
-                    _sttPipelineStatus.value = "Speaking via Swara Native Voice..."
+                    _sttPipelineStatus.value = "Speaking via MAX Native TTS..."
 
-                    swaraTtsService.speakChunk(chunk, isFirstChunk)
+                    maxNativeTTS.speakChunk(chunk, isFirstChunk)
                     isFirstChunk = false
                 }
 

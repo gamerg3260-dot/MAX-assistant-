@@ -323,7 +323,7 @@ class MaxOverlayService : Service() {
 
             serviceScope.launch {
                 val appInstance = com.example.AutoResponderApp.instance
-                val swaraTts = appInstance.swaraTtsService
+                val maxNativeTTS = appInstance.maxNativeTTS
 
                 // 1. Direct Calling Intent (Immediate ACTION_CALL, No UI/Confirmation Delay)
                 val directCallRes = appInstance.directCallManager.processVoiceCallCommand(spokenQuery)
@@ -336,7 +336,7 @@ class MaxOverlayService : Service() {
                     com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery, "DIRECT_CALL")
                     com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
 
-                    swaraTts.speak(feedback)
+                    maxNativeTTS.speak(feedback)
                     openWakeWord.resumeListening()
                     return@launch
                 }
@@ -354,7 +354,7 @@ class MaxOverlayService : Service() {
 
                     val intentToLaunch = appLaunchRes.launchIntent
                     if (intentToLaunch != null) {
-                        swaraTts.speak(feedback, onDone = {
+                        maxNativeTTS.speak(feedback, onDone = {
                             appInstance.appLauncherManager.launchIntentNow(intentToLaunch)
                         })
                         // Backup timer to guarantee launch if TTS onDone callback is skipped
@@ -363,7 +363,7 @@ class MaxOverlayService : Service() {
                             appInstance.appLauncherManager.launchIntentNow(intentToLaunch)
                         }
                     } else {
-                        swaraTts.speak(feedback)
+                        maxNativeTTS.speak(feedback)
                     }
                     openWakeWord.resumeListening()
                     return@launch
@@ -380,7 +380,7 @@ class MaxOverlayService : Service() {
                     com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery, "HARDWARE_TOGGLE")
                     com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
 
-                    swaraTts.speak(feedback)
+                    maxNativeTTS.speak(feedback)
                     openWakeWord.resumeListening()
                     return@launch
                 }
@@ -397,7 +397,7 @@ class MaxOverlayService : Service() {
                         _overlayStatus.value = "MAX Assistant Response"
                         _overlayResponse.value = fullReply
 
-                        swaraTts.speakChunk(chunk, isFirst)
+                        maxNativeTTS.speakChunk(chunk, isFirst)
                         isFirst = false
                     }
 
@@ -407,13 +407,13 @@ class MaxOverlayService : Service() {
                     } else {
                         val fallback = "Sorry, I could not complete the request right now."
                         _overlayResponse.value = fallback
-                        swaraTts.speak(fallback)
+                        maxNativeTTS.speak(fallback)
                     }
                 } catch (e: Exception) {
                     val err = "Error: ${e.localizedMessage ?: "Unknown error"}"
                     _overlayStatus.value = err
                     _overlayResponse.value = err
-                    swaraTts.speak(err)
+                    maxNativeTTS.speak(err)
                 } finally {
                     _isProcessing.value = false
                     _isSpeaking.value = false

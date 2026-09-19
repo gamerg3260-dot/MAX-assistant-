@@ -42,8 +42,11 @@ class AutoResponderApp : Application() {
     lateinit var elevenLabsKeyManager: com.example.voice.ElevenLabsKeyManager
         private set
 
-    lateinit var swaraTtsService: com.example.voice.SwaraTtsService
+    lateinit var maxNativeTTS: com.example.voice.MAXNativeTTS
         private set
+
+    val swaraTtsService: com.example.voice.MAXNativeTTS
+        get() = maxNativeTTS
 
     lateinit var maxSttManager: com.example.voice.MaxSttManager
         private set
@@ -90,7 +93,7 @@ class AutoResponderApp : Application() {
         audioManagerHelper = CallVoiceAudioManager(this)
         elevenLabsKeyManager = com.example.voice.ElevenLabsKeyManager(this)
         elevenLabsTtsService = com.example.voice.ElevenLabsTtsService(this)
-        swaraTtsService = com.example.voice.SwaraTtsService(this)
+        maxNativeTTS = com.example.voice.MAXNativeTTS(this)
         maxSttManager = com.example.voice.MaxSttManager(this)
         deviceToggleManager = com.example.toggle.DeviceToggleManager(this)
         emergencySosManager = com.example.sos.EmergencySosManager.getInstance(this)
