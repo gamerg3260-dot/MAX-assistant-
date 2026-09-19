@@ -206,6 +206,13 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val liveVoiceState: StateFlow<String> = MaxAssistantForegroundService.liveVoiceState
     val voiceDetectorState: StateFlow<VoiceDetectorState> = voiceDetector.detectorState
     val rmsDbLevel: StateFlow<Float> = voiceDetector.rmsDbLevel
+    val micAudioAmplitude: StateFlow<Float> = combine(
+        _voiceOrbRmsDb,
+        maxSttManager.rmsDbLevel,
+        voiceDetector.rmsDbLevel
+    ) { orbDb, sttDb, detectorDb ->
+        maxOf(orbDb, sttDb, detectorDb).coerceAtLeast(0f)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
     val isTtsSpeaking: StateFlow<Boolean> = combine(
         announcer.isSpeaking,
         swaraTtsService.isSpeaking,

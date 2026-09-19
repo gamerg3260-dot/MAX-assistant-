@@ -1105,6 +1105,21 @@ fun VoiceCallAnnouncerTab(
         }
 
         item {
+            val micAmplitude by viewModel.micAudioAmplitude.collectAsState()
+            val isListening by viewModel.isVoiceOrbListening.collectAsState()
+            val isSpeaking by viewModel.isTtsSpeaking.collectAsState()
+            RealtimeAudioVisualizerCard(
+                audioAmplitude = micAmplitude,
+                isListening = isListening,
+                isSpeaking = isSpeaking,
+                isProcessing = false,
+                theme = theme,
+                onStartListening = { viewModel.startVoiceOrbListening() },
+                onStopListening = { viewModel.stopVoiceOrb() }
+            )
+        }
+
+        item {
             SiriToggleCard(
                 title = "Caller Voice Announcer",
                 subtitle = "Speak caller name using Text-To-Speech on incoming call",
@@ -3147,14 +3162,15 @@ fun AssistantBottomInteractionDock(
             }
         }
 
-        // 4. Siri-Style Glowing Wave Animation at the bottom of the screen
-        SiriGlowWaveVisualizer(
+        // 4. Real-time dynamic visualizer Canvas reacting to microphone audio amplitude
+        RealtimeAudioVisualizerCanvas(
+            audioAmplitude = rmsDbLevel,
             isListening = isListening,
             isProcessing = isProcessing,
             isSpeaking = isSpeaking,
-            rmsDbLevel = rmsDbLevel,
             theme = theme,
-            height = 36.dp,
+            mode = VisualizerMode.RIBBON_WAVE,
+            height = 38.dp,
             modifier = Modifier.fillMaxWidth()
         )
     }
