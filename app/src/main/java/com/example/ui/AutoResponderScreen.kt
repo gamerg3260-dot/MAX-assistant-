@@ -248,11 +248,94 @@ object SiriThemePresets {
         orbColors = listOf(Color(0xFFFFB300), Color(0xFFFF3D00), Color(0xFFFF9100), Color(0xFFFFEA00))
     )
 
+    val Ultraviolet = SiriThemeColors(
+        name = "Ultraviolet",
+        bgGradient = listOf(Color(0xFF0C0416), Color(0xFF1B0A2E), Color(0xFF0B0314)),
+        cardBorder = Brush.linearGradient(
+            colors = listOf(Color(0x80B347FF), Color(0x80FF007A), Color(0x807000FF))
+        ),
+        primaryAccent = Color(0xFFC04CFF),
+        secondaryAccent = Color(0xFFFF0080),
+        glowColor = Color(0xFF8A2BE2),
+        orbColors = listOf(Color(0xFFC04CFF), Color(0xFFFF0080), Color(0xFF9B51E0), Color(0xFF4A00E0))
+    )
+
+    val OceanicDeep = SiriThemeColors(
+        name = "Oceanic Deep",
+        bgGradient = listOf(Color(0xFF02121C), Color(0xFF072438), Color(0xFF021019)),
+        cardBorder = Brush.linearGradient(
+            colors = listOf(Color(0x8000B4D8), Color(0x800077B6), Color(0x8090E0EF))
+        ),
+        primaryAccent = Color(0xFF00B4D8),
+        secondaryAccent = Color(0xFF48CAE4),
+        glowColor = Color(0xFF0096C7),
+        orbColors = listOf(Color(0xFF00B4D8), Color(0xFF0077B6), Color(0xFF48CAE4), Color(0xFF90E0EF))
+    )
+
+    val MidnightStealth = SiriThemeColors(
+        name = "Midnight Stealth",
+        bgGradient = listOf(Color(0xFF080C14), Color(0xFF101726), Color(0xFF060910)),
+        cardBorder = Brush.linearGradient(
+            colors = listOf(Color(0x8094A3B8), Color(0x8038BDF8), Color(0x8064748B))
+        ),
+        primaryAccent = Color(0xFF94A3B8),
+        secondaryAccent = Color(0xFF38BDF8),
+        glowColor = Color(0xFF475569),
+        orbColors = listOf(Color(0xFF94A3B8), Color(0xFF38BDF8), Color(0xFFCBD5E1), Color(0xFF64748B))
+    )
+
+    val CrimsonShadow = SiriThemeColors(
+        name = "Crimson Shadow",
+        bgGradient = listOf(Color(0xFF140306), Color(0xFF26080E), Color(0xFF0F0205)),
+        cardBorder = Brush.linearGradient(
+            colors = listOf(Color(0x80FF2A42), Color(0x80FF6B6B), Color(0x808B0000))
+        ),
+        primaryAccent = Color(0xFFFF2A42),
+        secondaryAccent = Color(0xFFFF6B6B),
+        glowColor = Color(0xFFE50914),
+        orbColors = listOf(Color(0xFFFF2A42), Color(0xFFFF6B6B), Color(0xFFFF4D4D), Color(0xFFB30000))
+    )
+
+    val TitaniumFrost = SiriThemeColors(
+        name = "Titanium Frost",
+        bgGradient = listOf(Color(0xFF0E131F), Color(0xFF1B2436), Color(0xFF0A0E17)),
+        cardBorder = Brush.linearGradient(
+            colors = listOf(Color(0x80E2E8F0), Color(0x8038BDF8), Color(0x8094A3B8))
+        ),
+        primaryAccent = Color(0xFFE2E8F0),
+        secondaryAccent = Color(0xFF38BDF8),
+        glowColor = Color(0xFF60A5FA),
+        orbColors = listOf(Color(0xFFE2E8F0), Color(0xFF38BDF8), Color(0xFF93C5FD), Color(0xFFCBD5E1))
+    )
+
+    fun getThemesForCategory(sectionIndex: Int): List<SiriThemeColors> {
+        return when (sectionIndex) {
+            0 -> listOf(SiriSpectrum, CyberNeon, Ultraviolet)
+            1 -> listOf(AuroraEmerald, SolarGold, OceanicDeep)
+            2 -> listOf(MidnightStealth, CrimsonShadow, TitaniumFrost)
+            else -> listOf(SiriSpectrum, CyberNeon, Ultraviolet)
+        }
+    }
+
+    fun getCategoryForTheme(presetName: String): Int {
+        return when (presetName) {
+            "Siri Spectrum", "Cyber Neon", "Ultraviolet" -> 0
+            "Aurora Emerald", "Solar Gold", "Oceanic Deep" -> 1
+            "Midnight Stealth", "Crimson Shadow", "Titanium Frost" -> 2
+            else -> 0
+        }
+    }
+
     fun getTheme(presetName: String): SiriThemeColors {
         return when (presetName) {
             "Cyber Neon" -> CyberNeon
             "Aurora Emerald" -> AuroraEmerald
             "Solar Gold" -> SolarGold
+            "Ultraviolet" -> Ultraviolet
+            "Oceanic Deep" -> OceanicDeep
+            "Midnight Stealth" -> MidnightStealth
+            "Crimson Shadow" -> CrimsonShadow
+            "Titanium Frost" -> TitaniumFrost
             else -> SiriSpectrum
         }
     }
@@ -294,7 +377,10 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
         SiriThemePresets.getTheme(settings.themePreset)
     }
 
-    var selectedTabIndex by remember { mutableIntStateOf(0) }
+    var currentSection by remember { mutableIntStateOf(0) }
+    var voiceSubTab by remember { mutableIntStateOf(0) }
+    var hardwareSubTab by remember { mutableIntStateOf(0) }
+    var securitySubTab by remember { mutableIntStateOf(0) }
     var showApiKeyDialog by remember { mutableStateOf(false) }
 
     // Permission launcher for all required permissions
@@ -364,9 +450,10 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
                     onOpenApiKeyDialog = { showApiKeyDialog = true }
                 )
 
-                // Theme Preset Chips
-                SiriThemeSelectorRow(
+                // Theme Preset Chips (Categorized into 3 logical sections)
+                SiriThemeSelectorSection(
                     currentPreset = settings.themePreset,
+                    currentMainSection = currentSection,
                     theme = currentTheme,
                     onSelectPreset = { viewModel.setThemePreset(it) }
                 )
@@ -382,11 +469,29 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
                     )
                 }
 
-                // Categorized Dashboard Tabs
-                SiriCategorizedTabRow(
-                    selectedTabIndex = selectedTabIndex,
+                // 1. Three-Section Primary Navigation Bar
+                ThreeSectionNavigationBar(
+                    selectedSection = currentSection,
                     theme = currentTheme,
-                    onTabSelected = { selectedTabIndex = it }
+                    onSectionSelected = { currentSection = it }
+                )
+
+                // Sub-Controls Bar for Active Section
+                SectionSubControlsBar(
+                    currentSection = currentSection,
+                    subTabIndex = when (currentSection) {
+                        0 -> voiceSubTab
+                        1 -> hardwareSubTab
+                        else -> securitySubTab
+                    },
+                    theme = currentTheme,
+                    onSubTabSelected = { subIndex ->
+                        when (currentSection) {
+                            0 -> voiceSubTab = subIndex
+                            1 -> hardwareSubTab = subIndex
+                            else -> securitySubTab = subIndex
+                        }
+                    }
                 )
 
                 // Tab Content Body
@@ -395,16 +500,41 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
                         .weight(1f)
                         .fillMaxWidth()
                 ) {
-                    when (selectedTabIndex) {
-                        0 -> VoiceCallAnnouncerTab(viewModel, settings, currentTheme)
-                        1 -> WhatsAppControlTab(viewModel, currentTheme)
-                        2 -> CameraAndSelfieTab(viewModel, currentTheme)
-                        3 -> AutoScrollTab(viewModel, currentTheme)
-                        4 -> EmergencySosTab(viewModel, currentTheme)
-                        5 -> BlocklistSpamTab(viewModel, settings, currentTheme)
-                        6 -> HardwareSystemControlTab(viewModel, settings, currentTheme)
-                        7 -> AppMediaControlTab(viewModel, settings, currentTheme)
-                        8 -> WorkbenchAndEventsTab(viewModel, settings, events, callHistoryLogs, acceptedCallsCount, rejectedCallsCount, simCallState, currentTheme)
+                    when (currentSection) {
+                        0 -> {
+                            // Section 0: Voice & AI
+                            when (voiceSubTab) {
+                                0 -> VoiceCallAnnouncerTab(viewModel, settings, currentTheme)
+                                else -> WhatsAppControlTab(viewModel, currentTheme)
+                            }
+                        }
+                        1 -> {
+                            // Section 1: Hardware & Tools
+                            when (hardwareSubTab) {
+                                0 -> HardwareSystemControlTab(viewModel, settings, currentTheme)
+                                1 -> AppMediaControlTab(viewModel, settings, currentTheme)
+                                2 -> CameraAndSelfieTab(viewModel, currentTheme)
+                                else -> AutoScrollTab(viewModel, currentTheme)
+                            }
+                        }
+                        else -> {
+                            // Section 2: Security & Settings
+                            when (securitySubTab) {
+                                0 -> IntegratedSettingsTab(
+                                    viewModel = viewModel,
+                                    settings = settings,
+                                    missingPermissions = missingPermissions,
+                                    theme = currentTheme,
+                                    onRequestPermissions = {
+                                        permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
+                                    },
+                                    onOpenApiKeyDialog = { showApiKeyDialog = true }
+                                )
+                                1 -> EmergencySosTab(viewModel, currentTheme)
+                                2 -> BlocklistSpamTab(viewModel, settings, currentTheme)
+                                else -> WorkbenchAndEventsTab(viewModel, settings, events, callHistoryLogs, acceptedCallsCount, rejectedCallsCount, simCallState, currentTheme)
+                            }
+                        }
                     }
                 }
             }
@@ -580,47 +710,161 @@ fun SiriHeaderBar(
     }
 }
 
+data class ThemeCategory(
+    val name: String,
+    val icon: ImageVector,
+    val themes: List<SiriThemeColors>
+)
+
+@Composable
+fun SiriThemeSelectorSection(
+    currentPreset: String,
+    currentMainSection: Int,
+    theme: SiriThemeColors,
+    onSelectPreset: (String) -> Unit
+) {
+    var selectedCategoryIndex by remember(currentMainSection) {
+        mutableIntStateOf(currentMainSection.coerceIn(0, 2))
+    }
+
+    val categories = remember {
+        listOf(
+            ThemeCategory("Voice & Cyber", Icons.Default.RecordVoiceOver, SiriThemePresets.getThemesForCategory(0)),
+            ThemeCategory("Hardware & Solar", Icons.Default.Tune, SiriThemePresets.getThemesForCategory(1)),
+            ThemeCategory("Security & Stealth", Icons.Default.Security, SiriThemePresets.getThemesForCategory(2))
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 4.dp)
+    ) {
+        // Category Switcher Row (Categorized into Three Logical Sections)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            categories.forEachIndexed { index, cat ->
+                val isCatSelected = selectedCategoryIndex == index
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isCatSelected) theme.primaryAccent.copy(alpha = 0.22f)
+                            else Color.White.copy(alpha = 0.05f)
+                        )
+                        .border(
+                            width = if (isCatSelected) 1.2.dp else 0.5.dp,
+                            color = if (isCatSelected) theme.primaryAccent else Color.White.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .clickable { selectedCategoryIndex = index }
+                        .padding(vertical = 5.dp, horizontal = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = cat.icon,
+                            contentDescription = cat.name,
+                            tint = if (isCatSelected) theme.primaryAccent else Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = cat.name,
+                            fontSize = 10.sp,
+                            fontWeight = if (isCatSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isCatSelected) theme.primaryAccent else Color.White.copy(alpha = 0.7f),
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Themes within the selected category
+        val currentThemes = categories[selectedCategoryIndex].themes
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            currentThemes.forEach { preset ->
+                val isSelected = preset.name == currentPreset
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (isSelected) theme.primaryAccent.copy(alpha = 0.25f)
+                            else Color.White.copy(alpha = 0.07f)
+                        )
+                        .border(
+                            width = if (isSelected) 1.5.dp else 0.5.dp,
+                            color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable { onSelectPreset(preset.name) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(preset.primaryAccent)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(preset.secondaryAccent)
+                        )
+                        Text(
+                            text = preset.name,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.8f)
+                        )
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Active Theme",
+                                tint = theme.primaryAccent,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun SiriThemeSelectorRow(
     currentPreset: String,
     theme: SiriThemeColors,
     onSelectPreset: (String) -> Unit
 ) {
-    val presets = listOf("Siri Spectrum", "Cyber Neon", "Aurora Emerald", "Solar Gold")
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        presets.forEach { preset ->
-            val isSelected = preset == currentPreset
-            Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(
-                        if (isSelected) theme.primaryAccent.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f)
-                    )
-                    .border(
-                        width = if (isSelected) 1.5.dp else 0.5.dp,
-                        color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.25f),
-                        shape = CircleShape
-                    )
-                    .clickable { onSelectPreset(preset) }
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = preset,
-                    fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.75f)
-                )
-            }
-        }
-    }
+    SiriThemeSelectorSection(
+        currentPreset = currentPreset,
+        currentMainSection = SiriThemePresets.getCategoryForTheme(currentPreset),
+        theme = theme,
+        onSelectPreset = onSelectPreset
+    )
 }
 
 @Composable
@@ -719,6 +963,125 @@ fun SiriCategorizedTabRow(
                     )
                 }
             )
+        }
+    }
+}
+
+@Composable
+fun ThreeSectionNavigationBar(
+    selectedSection: Int,
+    theme: SiriThemeColors,
+    onSectionSelected: (Int) -> Unit
+) {
+    val sections = listOf(
+        Triple("Voice & AI", "Calls & WhatsApp", Icons.Default.RecordVoiceOver),
+        Triple("Hardware & Tools", "System & Camera", Icons.Default.Tune),
+        Triple("Security & Settings", "SOS & Config", Icons.Default.Security)
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        sections.forEachIndexed { index, (title, subtitle, icon) ->
+            val isSelected = selectedSection == index
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (isSelected) theme.primaryAccent.copy(alpha = 0.2f)
+                        else Color.White.copy(alpha = 0.05f)
+                    )
+                    .border(
+                        width = if (isSelected) 1.5.dp else 0.5.dp,
+                        color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .clickable { onSectionSelected(index) }
+                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.5f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = title,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Text(
+                        text = subtitle,
+                        fontSize = 9.sp,
+                        color = if (isSelected) theme.secondaryAccent else Color.White.copy(alpha = 0.4f),
+                        maxLines = 1,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SectionSubControlsBar(
+    currentSection: Int,
+    subTabIndex: Int,
+    theme: SiriThemeColors,
+    onSubTabSelected: (Int) -> Unit
+) {
+    val subTabs = when (currentSection) {
+        0 -> listOf("Voice Calls", "WhatsApp")
+        1 -> listOf("Hardware", "Apps/Media", "Camera & Selfie", "Auto Scroll")
+        else -> listOf("Settings", "Emergency SOS", "Blocklist", "Workbench")
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        subTabs.forEachIndexed { index, name ->
+            val isSelected = subTabIndex == index
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (isSelected) theme.primaryAccent.copy(alpha = 0.22f)
+                        else Color.White.copy(alpha = 0.06f)
+                    )
+                    .border(
+                        width = if (isSelected) 1.dp else 0.5.dp,
+                        color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .clickable { onSubTabSelected(index) }
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            ) {
+                Text(
+                    text = name,
+                    fontSize = 11.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.65f),
+                    maxLines = 1
+                )
+            }
         }
     }
 }
