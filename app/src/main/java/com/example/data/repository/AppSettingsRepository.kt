@@ -47,6 +47,28 @@ data class AppSettings(
     // Theme Customization Option
     val themePreset: String = "Siri Spectrum",
 
+    // Voice AI Dedicated Settings
+    val isDefaultVoiceAssistant: Boolean = true,
+    val voiceLanguage: String = "Hindi (India)",
+    val voiceResponseStyle: String = "Conversational",
+
+    // Hardware & Audio I/O Settings
+    val microphoneSource: String = "Built-in Mic (Auto)",
+    val speakerOutput: String = "Auto (Speakerphone)",
+    val inputSensitivity: Float = 0.75f,
+    val equalizerPreset: String = "Voice Clarity",
+    val bassBoost: Float = 0.4f,
+    val trebleBoost: Float = 0.6f,
+
+    // Security & Access Control Settings
+    val isVoiceIdEnabled: Boolean = true,
+    val isPinRequiredForActions: Boolean = false,
+    val securityPin: String = "1234",
+    val isSosLocationBroadcast: Boolean = true,
+    val isSosSmsBroadcast: Boolean = true,
+    val isSosSirensBroadcast: Boolean = true,
+    val sosAlertMessage: String = "EMERGENCY: I need immediate help. My current GPS location is being broadcast via MAX Assistant.",
+
     // Auto-Responder & AI Settings (retained for comprehensive call management)
     val isAutoResponderEnabled: Boolean = true,
     val isSmsAutoReplyEnabled: Boolean = true,
@@ -102,6 +124,28 @@ class AppSettingsRepository(context: Context) {
 
             themePreset = prefs.getString("theme_preset", "Siri Spectrum") ?: "Siri Spectrum",
 
+            isDefaultVoiceAssistant = prefs.getBoolean("is_default_voice_assistant", true),
+            voiceLanguage = prefs.getString("voice_language", "Hindi (India)") ?: "Hindi (India)",
+            voiceResponseStyle = prefs.getString("voice_response_style", "Conversational") ?: "Conversational",
+
+            microphoneSource = prefs.getString("microphone_source", "Built-in Mic (Auto)") ?: "Built-in Mic (Auto)",
+            speakerOutput = prefs.getString("speaker_output", "Auto (Speakerphone)") ?: "Auto (Speakerphone)",
+            inputSensitivity = prefs.getFloat("input_sensitivity", 0.75f),
+            equalizerPreset = prefs.getString("equalizer_preset", "Voice Clarity") ?: "Voice Clarity",
+            bassBoost = prefs.getFloat("bass_boost", 0.4f),
+            trebleBoost = prefs.getFloat("treble_boost", 0.6f),
+
+            isVoiceIdEnabled = prefs.getBoolean("is_voice_id_enabled", true),
+            isPinRequiredForActions = prefs.getBoolean("is_pin_required_for_actions", false),
+            securityPin = prefs.getString("security_pin", "1234") ?: "1234",
+            isSosLocationBroadcast = prefs.getBoolean("is_sos_location_broadcast", true),
+            isSosSmsBroadcast = prefs.getBoolean("is_sos_sms_broadcast", true),
+            isSosSirensBroadcast = prefs.getBoolean("is_sos_sirens_broadcast", true),
+            sosAlertMessage = prefs.getString(
+                "sos_alert_message",
+                "EMERGENCY: I need immediate help. My current GPS location is being broadcast via MAX Assistant."
+            ) ?: "EMERGENCY: I need immediate help. My current GPS location is being broadcast via MAX Assistant.",
+
             isAutoResponderEnabled = prefs.getBoolean("is_auto_responder_enabled", true),
             isSmsAutoReplyEnabled = prefs.getBoolean("is_sms_auto_reply_enabled", true),
             isCallAutoReplyEnabled = prefs.getBoolean("is_call_auto_reply_enabled", true),
@@ -149,6 +193,25 @@ class AppSettingsRepository(context: Context) {
             putBoolean("is_spotify_auto_ducking", newSettings.isSpotifyAutoDucking)
 
             putString("theme_preset", newSettings.themePreset)
+
+            putBoolean("is_default_voice_assistant", newSettings.isDefaultVoiceAssistant)
+            putString("voice_language", newSettings.voiceLanguage)
+            putString("voice_response_style", newSettings.voiceResponseStyle)
+
+            putString("microphone_source", newSettings.microphoneSource)
+            putString("speaker_output", newSettings.speakerOutput)
+            putFloat("input_sensitivity", newSettings.inputSensitivity)
+            putString("equalizer_preset", newSettings.equalizerPreset)
+            putFloat("bass_boost", newSettings.bassBoost)
+            putFloat("treble_boost", newSettings.trebleBoost)
+
+            putBoolean("is_voice_id_enabled", newSettings.isVoiceIdEnabled)
+            putBoolean("is_pin_required_for_actions", newSettings.isPinRequiredForActions)
+            putString("security_pin", newSettings.securityPin)
+            putBoolean("is_sos_location_broadcast", newSettings.isSosLocationBroadcast)
+            putBoolean("is_sos_sms_broadcast", newSettings.isSosSmsBroadcast)
+            putBoolean("is_sos_sirens_broadcast", newSettings.isSosSirensBroadcast)
+            putString("sos_alert_message", newSettings.sosAlertMessage)
 
             putBoolean("is_auto_responder_enabled", newSettings.isAutoResponderEnabled)
             putBoolean("is_sms_auto_reply_enabled", newSettings.isSmsAutoReplyEnabled)
@@ -305,6 +368,80 @@ class AppSettingsRepository(context: Context) {
 
     fun setModelName(model: String) {
         updateSettings(_settings.value.copy(modelName = model))
+    }
+
+    // Voice AI Setters
+    fun setDefaultVoiceAssistant(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isDefaultVoiceAssistant = enabled))
+    }
+
+    fun setVoiceLanguage(language: String) {
+        updateSettings(_settings.value.copy(voiceLanguage = language))
+    }
+
+    fun setVoiceResponseStyle(style: String) {
+        updateSettings(_settings.value.copy(voiceResponseStyle = style))
+    }
+
+    // Hardware Setters
+    fun setMicrophoneSource(source: String) {
+        updateSettings(_settings.value.copy(microphoneSource = source))
+    }
+
+    fun setSpeakerOutput(output: String) {
+        updateSettings(_settings.value.copy(speakerOutput = output))
+    }
+
+    fun setInputSensitivity(sensitivity: Float) {
+        updateSettings(_settings.value.copy(inputSensitivity = sensitivity))
+    }
+
+    fun setEqualizerPreset(preset: String) {
+        val (bass, treble) = when (preset) {
+            "Voice Clarity" -> 0.3f to 0.7f
+            "Bass Boost" -> 0.8f to 0.4f
+            "Treble Crisp" -> 0.2f to 0.9f
+            "Studio Flat" -> 0.5f to 0.5f
+            else -> 0.4f to 0.6f
+        }
+        updateSettings(_settings.value.copy(equalizerPreset = preset, bassBoost = bass, trebleBoost = treble))
+    }
+
+    fun setBassBoost(bass: Float) {
+        updateSettings(_settings.value.copy(bassBoost = bass))
+    }
+
+    fun setTrebleBoost(treble: Float) {
+        updateSettings(_settings.value.copy(trebleBoost = treble))
+    }
+
+    // Security & SOS Setters
+    fun setVoiceIdEnabled(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isVoiceIdEnabled = enabled))
+    }
+
+    fun setPinRequiredForActions(required: Boolean) {
+        updateSettings(_settings.value.copy(isPinRequiredForActions = required))
+    }
+
+    fun setSecurityPin(pin: String) {
+        updateSettings(_settings.value.copy(securityPin = pin))
+    }
+
+    fun setSosLocationBroadcast(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isSosLocationBroadcast = enabled))
+    }
+
+    fun setSosSmsBroadcast(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isSosSmsBroadcast = enabled))
+    }
+
+    fun setSosSirensBroadcast(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isSosSirensBroadcast = enabled))
+    }
+
+    fun setSosAlertMessage(message: String) {
+        updateSettings(_settings.value.copy(sosAlertMessage = message))
     }
 
     companion object {

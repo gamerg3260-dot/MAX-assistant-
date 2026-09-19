@@ -370,6 +370,73 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         settingsRepo.setThemePreset(preset)
     }
 
+    // Voice AI Settings
+    fun setDefaultVoiceAssistant(enabled: Boolean) {
+        settingsRepo.setDefaultVoiceAssistant(enabled)
+    }
+
+    fun setVoiceLanguage(language: String) {
+        settingsRepo.setVoiceLanguage(language)
+    }
+
+    fun setVoiceResponseStyle(style: String) {
+        settingsRepo.setVoiceResponseStyle(style)
+    }
+
+    // Hardware Settings
+    fun setMicrophoneSource(source: String) {
+        settingsRepo.setMicrophoneSource(source)
+    }
+
+    fun setSpeakerOutput(output: String) {
+        settingsRepo.setSpeakerOutput(output)
+    }
+
+    fun setInputSensitivity(sensitivity: Float) {
+        settingsRepo.setInputSensitivity(sensitivity)
+    }
+
+    fun setEqualizerPreset(preset: String) {
+        settingsRepo.setEqualizerPreset(preset)
+    }
+
+    fun setBassBoost(bass: Float) {
+        settingsRepo.setBassBoost(bass)
+    }
+
+    fun setTrebleBoost(treble: Float) {
+        settingsRepo.setTrebleBoost(treble)
+    }
+
+    // Security & SOS Settings
+    fun setVoiceIdEnabled(enabled: Boolean) {
+        settingsRepo.setVoiceIdEnabled(enabled)
+    }
+
+    fun setPinRequiredForActions(required: Boolean) {
+        settingsRepo.setPinRequiredForActions(required)
+    }
+
+    fun setSecurityPin(pin: String) {
+        settingsRepo.setSecurityPin(pin)
+    }
+
+    fun setSosLocationBroadcast(enabled: Boolean) {
+        settingsRepo.setSosLocationBroadcast(enabled)
+    }
+
+    fun setSosSmsBroadcast(enabled: Boolean) {
+        settingsRepo.setSosSmsBroadcast(enabled)
+    }
+
+    fun setSosSirensBroadcast(enabled: Boolean) {
+        settingsRepo.setSosSirensBroadcast(enabled)
+    }
+
+    fun setSosAlertMessage(message: String) {
+        settingsRepo.setSosAlertMessage(message)
+    }
+
     fun toggleAutoResponder(enabled: Boolean) {
         settingsRepo.setAutoResponderEnabled(enabled)
     }
