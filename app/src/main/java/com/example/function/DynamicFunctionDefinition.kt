@@ -1,5 +1,7 @@
 package com.example.function
 
+import android.content.Intent
+
 /**
  * Categories of dynamic functions executable by MAX Assistant.
  */
@@ -11,6 +13,7 @@ enum class FunctionCategory {
     CAMERA_CAPTURE,
     ACCESSIBILITY_NAV,
     DEVICE_UTILITY,
+    NOTIFICATIONS,
     COMPOSITE_MACRO
 }
 
@@ -33,8 +36,19 @@ data class FunctionExecutionResult(
     val resultSummary: String,
     val feedbackSpeech: String = resultSummary,
     val data: Map<String, Any?> = emptyMap(),
-    val error: String? = null
+    val error: String? = null,
+    val requiresPermission: Boolean = false,
+    val missingPermission: String? = null,
+    val resolutionIntent: Intent? = null
 )
+
+enum class StepStatus {
+    PENDING,
+    EXECUTING,
+    SUCCESS,
+    PERMISSION_REQUIRED,
+    FAILED
+}
 
 /**
  * Definition of a callable dynamic function in MAX Assistant.
@@ -57,6 +71,7 @@ data class PlannedActionStep(
     val arguments: Map<String, Any?>,
     val description: String,
     var isExecuted: Boolean = false,
+    var status: StepStatus = StepStatus.PENDING,
     var result: FunctionExecutionResult? = null
 )
 
@@ -69,5 +84,7 @@ data class DynamicActionPlan(
     val steps: List<PlannedActionStep>,
     val formulatedVia: String, // "LOCAL_EDGE_DECOMPOSER" or "GEMINI_FUNCTION_CALLING"
     var isCompleted: Boolean = false,
+    var currentExecutingStepIndex: Int = -1,
     var finalFeedbackMessage: String = ""
 )
+

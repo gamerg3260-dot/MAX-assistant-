@@ -892,13 +892,22 @@ private fun VoiceAiSettingsSubScreen(
                                 Text(
                                     text = "${step.stepIndex + 1}. ${step.description}",
                                     fontSize = 10.sp,
-                                    color = Color.White.copy(alpha = 0.85f)
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.weight(1f)
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                val (statusLabel, statusColor) = when (step.status) {
+                                    com.example.function.StepStatus.EXECUTING -> "⏳ Running" to Color(0xFF64B5F6)
+                                    com.example.function.StepStatus.SUCCESS -> "✓ Success" to Color(0xFF00E676)
+                                    com.example.function.StepStatus.PERMISSION_REQUIRED -> "⚠️ Permission Required" to Color(0xFFFFB300)
+                                    com.example.function.StepStatus.FAILED -> "✕ Failed" to Color(0xFFFF5252)
+                                    com.example.function.StepStatus.PENDING -> "Pending" to Color.White.copy(alpha = 0.5f)
+                                }
                                 Text(
-                                    text = if (step.isExecuted) "✓ Executed" else "Pending",
+                                    text = statusLabel,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (step.isExecuted) Color(0xFF00E676) else Color(0xFFFFB300)
+                                    color = statusColor
                                 )
                             }
                         }

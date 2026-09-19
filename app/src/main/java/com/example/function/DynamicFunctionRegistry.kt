@@ -1,9 +1,15 @@
 package com.example.function
 
+import android.Manifest
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.BatteryManager
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.example.accessibility.MaxAccessibilityService
 import com.example.camera.MaxCameraManager
 import com.example.launcher.AppLauncherManager
@@ -24,6 +30,9 @@ import java.util.Locale
  * Extensible Dynamic Function Registry for MAX Assistant.
  * Exposes device, telephony, application, camera, and system capabilities as
  * dynamically callable functions and formats them for Gemini tool calling.
+ * 
+ * Features strict permission validation before execution with graceful fallbacks
+ * and descriptive error metadata.
  */
 class DynamicFunctionRegistry(
     private val context: Context,
@@ -42,30 +51,39 @@ class DynamicFunctionRegistry(
         registerCoreFunctions()
     }
 
+    private fun hasPermission(permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun isNotificationListenerEnabled(): Boolean {
+        return WhatsAppControlManager.isNotificationListenerGranted(context)
+    }
+
     private fun registerCoreFunctions() {
-        // 1. Hardware Toggle & Settings Control
+        // 1. Hardware Toggles & Settings
         register(
             DynamicFunction(
                 name = "toggle_hardware_setting",
-                description = "Controls device hardware settings like Flashlight/Torch, Wi-Fi, Bluetooth, Sound Mode, Volume, Screen Brightness, or Hotspot.",
+                description = "Controls mobile hardware toggles and system audio/screen settings (Flashlight, Wi-Fi, Bluetooth, Volume, Brightness, Sound Mode/DND).",
                 category = FunctionCategory.HARDWARE_CONTROL,
                 parameters = listOf(
                     FunctionParameter(
                         name = "target",
                         type = "string",
-                        description = "Hardware feature to control: 'flashlight', 'wifi', 'bluetooth', 'volume', 'brightness', 'sound_mode', 'dnd', or 'hotspot'",
-                        allowedValues = listOf("flashlight", "wifi", "bluetooth", "volume", "brightness", "sound_mode", "dnd", "hotspot")
+                        description = "Hardware component: 'flashlight', 'wifi', 'bluetooth', 'volume', 'brightness', 'sound_mode'",
+                        allowedValues = listOf("flashlight", "wifi", "bluetooth", "volume", "brightness", "sound_mode")
                     ),
                     FunctionParameter(
                         name = "state",
                         type = "string",
-                        description = "Desired state: 'on', 'off', 'toggle', 'up', 'down', 'set'",
+                        description = "State or operation: 'on', 'off', 'toggle', 'up', 'down', 'silent', 'vibrate', 'normal'",
+                        allowedValues = listOf("on", "off", "toggle", "up", "down", "silent", "vibrate", "normal"),
                         isRequired = false
                     ),
                     FunctionParameter(
                         name = "level",
                         type = "integer",
-                        description = "Target percentage or level (0-100) for volume or brightness",
+                        description = "Percentage level for volume or brightness (0-100)",
                         isRequired = false
                     )
                 )
@@ -74,81 +92,189 @@ class DynamicFunctionRegistry(
                 val state = args["state"]?.toString()?.lowercase(Locale.ROOT) ?: "toggle"
                 val level = (args["level"] as? Number)?.toInt()
 
-                when (target) {
-                    "flashlight", "torch" -> {
-                        val turnOn = when (state) {
-                            "on", "enable" -> true
-                            "off", "disable" -> false
-                            else -> !deviceToggleManager.isFlashlightOn.value
+                try {
+                    when (target) {
+                        "flashlight", "torch" -> {
+                            val turnOn = when (state) {
+                                "on", "enable" -> true
+                                "off", "disable" -> false
+                                else -> !deviceToggleManager.isFlashlightOn.value
+                            }
+                            val res = deviceToggleManager.setFlashlightEnabled(turnOn)
+                            val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
+                            FunctionExecutionResult(
+                                isSuccess = res is ToggleResult.Success,
+                                resultSummary = msg,
+                                error = if (res is ToggleResult.Error) res.message else null
+                            )
                         }
-                        val res = deviceToggleManager.setFlashlightEnabled(turnOn)
-                        val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
-                        FunctionExecutionResult(
-                            isSuccess = res is ToggleResult.Success,
-                            resultSummary = msg
-                        )
-                    }
-                    "wifi", "wi-fi" -> {
-                        val turnOn = when (state) {
-                            "on", "enable" -> true
-                            "off", "disable" -> false
-                            else -> !deviceToggleManager.isWifiEnabled.value
+                        "wifi", "wi-fi" -> {
+                            val turnOn = when (state) {
+                                "on", "enable" -> true
+                                "off", "disable" -> false
+                                else -> !deviceToggleManager.isWifiEnabled.value
+                            }
+                            val res = deviceToggleManager.setWifiEnabled(turnOn)
+                            val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
+                            FunctionExecutionResult(
+                                isSuccess = res is ToggleResult.Success,
+                                resultSummary = msg
+                            )
                         }
-                        val res = deviceToggleManager.setWifiEnabled(turnOn)
-                        val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
-                        FunctionExecutionResult(
-                            isSuccess = res is ToggleResult.Success,
-                            resultSummary = msg
-                        )
-                    }
-                    "bluetooth" -> {
-                        val voiceCmd = if (state in listOf("off", "disable")) "turn off bluetooth" else "turn on bluetooth"
-                        val res = deviceToggleManager.processVoiceToggleCommand(voiceCmd)
-                        FunctionExecutionResult(
-                            isSuccess = res.isHandled,
-                            resultSummary = res.feedbackMessage
-                        )
-                    }
-                    "volume" -> {
-                        val voiceCmd = if (level != null) "set volume to $level percent" else if (state in listOf("up", "increase")) "increase volume" else "decrease volume"
-                        val res = deviceToggleManager.processVoiceToggleCommand(voiceCmd)
-                        FunctionExecutionResult(
-                            isSuccess = res.isHandled,
-                            resultSummary = res.feedbackMessage
-                        )
-                    }
-                    "brightness" -> {
-                        val targetLevel = level ?: if (state in listOf("up", "increase")) 80 else 30
-                        val res = deviceToggleManager.setScreenBrightness(targetLevel)
-                        val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
-                        FunctionExecutionResult(
-                            isSuccess = res is ToggleResult.Success,
-                            resultSummary = msg
-                        )
-                    }
-                    "sound_mode", "dnd", "silent" -> {
-                        val targetMode = when (state) {
-                            "silent", "mute" -> SoundMode.SILENT
-                            "vibrate" -> SoundMode.VIBRATE
-                            else -> SoundMode.NORMAL
+                        "bluetooth" -> {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
+                                    return@DynamicFunction FunctionExecutionResult(
+                                        isSuccess = false,
+                                        resultSummary = "Bluetooth control requires Nearby Devices permission.",
+                                        requiresPermission = true,
+                                        missingPermission = Manifest.permission.BLUETOOTH_CONNECT,
+                                        error = "Missing BLUETOOTH_CONNECT permission"
+                                    )
+                                }
+                            }
+                            val voiceCmd = if (state in listOf("off", "disable")) "turn off bluetooth" else "turn on bluetooth"
+                            val res = deviceToggleManager.processVoiceToggleCommand(voiceCmd)
+                            FunctionExecutionResult(
+                                isSuccess = res.isHandled,
+                                resultSummary = res.feedbackMessage
+                            )
                         }
-                        val res = deviceToggleManager.setSoundMode(targetMode)
-                        val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
-                        FunctionExecutionResult(
-                            isSuccess = res is ToggleResult.Success,
-                            resultSummary = msg
+                        "volume" -> {
+                            val voiceCmd = if (level != null) "set volume to $level percent" else if (state in listOf("up", "increase")) "increase volume" else "decrease volume"
+                            val res = deviceToggleManager.processVoiceToggleCommand(voiceCmd)
+                            FunctionExecutionResult(
+                                isSuccess = res.isHandled,
+                                resultSummary = res.feedbackMessage
+                            )
+                        }
+                        "brightness" -> {
+                            if (!Settings.System.canWrite(context)) {
+                                val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS).apply {
+                                    data = android.net.Uri.parse("package:${context.packageName}")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                return@DynamicFunction FunctionExecutionResult(
+                                    isSuccess = false,
+                                    resultSummary = "Changing screen brightness requires 'Write System Settings' permission.",
+                                    requiresPermission = true,
+                                    missingPermission = "android.permission.WRITE_SETTINGS",
+                                    resolutionIntent = intent,
+                                    error = "Missing WRITE_SETTINGS permission"
+                                )
+                            }
+                            val targetLevel = level ?: if (state in listOf("up", "increase")) 80 else 30
+                            val res = deviceToggleManager.setScreenBrightness(targetLevel)
+                            val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
+                            FunctionExecutionResult(
+                                isSuccess = res is ToggleResult.Success,
+                                resultSummary = msg,
+                                error = if (res is ToggleResult.Error) res.message else null
+                            )
+                        }
+                        "sound_mode", "dnd", "silent" -> {
+                            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                            val isDndGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                notificationManager?.isNotificationPolicyAccessGranted == true
+                            } else true
+
+                            val targetMode = when (state) {
+                                "silent", "mute" -> SoundMode.SILENT
+                                "vibrate" -> SoundMode.VIBRATE
+                                else -> SoundMode.NORMAL
+                            }
+                            val res = deviceToggleManager.setSoundMode(targetMode)
+                            val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
+                            
+                            val permRequired = !isDndGranted && targetMode == SoundMode.SILENT
+                            val resolutionIntent = if (permRequired && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            } else null
+
+                            FunctionExecutionResult(
+                                isSuccess = res is ToggleResult.Success,
+                                resultSummary = if (permRequired) "$msg (Do Not Disturb access recommended for complete silence)." else msg,
+                                requiresPermission = permRequired,
+                                missingPermission = if (permRequired) "android.permission.ACCESS_NOTIFICATION_POLICY" else null,
+                                resolutionIntent = resolutionIntent
+                            )
+                        }
+                        else -> FunctionExecutionResult(
+                            isSuccess = false,
+                            resultSummary = "Unknown hardware target: $target",
+                            error = "Unsupported target"
                         )
                     }
-                    else -> FunctionExecutionResult(
+                } catch (e: Exception) {
+                    Log.e(tag, "Error in toggle_hardware_setting: ${e.message}", e)
+                    FunctionExecutionResult(
                         isSuccess = false,
-                        resultSummary = "Unknown hardware target: $target",
-                        error = "Unsupported target"
+                        resultSummary = "Error controlling $target: ${e.localizedMessage}",
+                        error = e.message
                     )
                 }
             }
         )
 
-        // 2. Application Launch & Deep-linking
+        // 2. WhatsApp & Notification Reading
+        register(
+            DynamicFunction(
+                name = "check_whatsapp_messages",
+                description = "Checks and reads recent incoming WhatsApp notifications and messages.",
+                category = FunctionCategory.NOTIFICATIONS,
+                parameters = listOf(
+                    FunctionParameter(
+                        name = "limit",
+                        type = "integer",
+                        description = "Number of recent WhatsApp messages to retrieve (default 3)",
+                        isRequired = false
+                    )
+                )
+            ) { args ->
+                try {
+                    if (!isNotificationListenerEnabled()) {
+                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        return@DynamicFunction FunctionExecutionResult(
+                            isSuccess = false,
+                            resultSummary = "Checking WhatsApp messages requires Notification Access permission. Please grant permission in Settings.",
+                            requiresPermission = true,
+                            missingPermission = "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+                            resolutionIntent = intent,
+                            error = "Missing Notification Access permission"
+                        )
+                    }
+
+                    val limit = (args["limit"] as? Number)?.toInt() ?: 3
+                    val msgs = whatsAppManager.messages.value.take(limit)
+
+                    if (msgs.isEmpty()) {
+                        FunctionExecutionResult(
+                            isSuccess = true,
+                            resultSummary = "No new WhatsApp messages found.",
+                            data = mapOf("messageCount" to 0)
+                        )
+                    } else {
+                        val summaryText = msgs.joinToString("; ") { "From ${it.sender}: ${it.text}" }
+                        FunctionExecutionResult(
+                            isSuccess = true,
+                            resultSummary = "Found ${msgs.size} recent WhatsApp message${if (msgs.size > 1) "s" else ""}: $summaryText",
+                            data = mapOf("messages" to msgs.map { mapOf("sender" to it.sender, "text" to it.text) })
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(tag, "Error checking WhatsApp messages: ${e.message}", e)
+                    FunctionExecutionResult(
+                        isSuccess = false,
+                        resultSummary = "Failed to retrieve WhatsApp messages: ${e.localizedMessage}",
+                        error = e.message
+                    )
+                }
+            }
+        )
+
+        // 3. Application Launch & Deep-linking
         register(
             DynamicFunction(
                 name = "launch_application",
@@ -162,25 +288,34 @@ class DynamicFunctionRegistry(
                     )
                 )
             ) { args ->
-                val appName = args["appName"]?.toString() ?: "Settings"
-                val res = appLauncherManager.processVoiceAppLaunchCommand("open $appName")
-                if (res.isHandled && res.launchIntent != null) {
-                    appLauncherManager.launchIntentNow(res.launchIntent)
-                    FunctionExecutionResult(
-                        isSuccess = true,
-                        resultSummary = "Opening $appName."
-                    )
-                } else {
+                try {
+                    val appName = args["appName"]?.toString() ?: "Settings"
+                    val res = appLauncherManager.processVoiceAppLaunchCommand("open $appName")
+                    if (res.isHandled && res.launchIntent != null) {
+                        appLauncherManager.launchIntentNow(res.launchIntent)
+                        FunctionExecutionResult(
+                            isSuccess = true,
+                            resultSummary = "Opening $appName."
+                        )
+                    } else {
+                        FunctionExecutionResult(
+                            isSuccess = false,
+                            resultSummary = "Could not find or launch application: $appName",
+                            error = "App not found"
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(tag, "Error launching application: ${e.message}", e)
                     FunctionExecutionResult(
                         isSuccess = false,
-                        resultSummary = "Could not find or launch application: $appName",
-                        error = "App not found"
+                        resultSummary = "Failed to launch app: ${e.localizedMessage}",
+                        error = e.message
                     )
                 }
             }
         )
 
-        // 3. Direct Phone Call Initiation
+        // 4. Direct Phone Call Initiation
         register(
             DynamicFunction(
                 name = "make_phone_call",
@@ -194,39 +329,51 @@ class DynamicFunctionRegistry(
                     )
                 )
             ) { args ->
-                val recipient = args["recipient"]?.toString() ?: ""
-                if (recipient.isBlank()) {
-                    return@DynamicFunction FunctionExecutionResult(
-                        isSuccess = false,
-                        resultSummary = "No recipient provided for phone call.",
-                        error = "Missing recipient"
-                    )
-                }
-                val res = directCallManager.processVoiceCallCommand("call $recipient")
-                if (res.isHandled && res.callIntent != null) {
-                    try {
+                try {
+                    val recipient = args["recipient"]?.toString() ?: ""
+                    if (recipient.isBlank()) {
+                        return@DynamicFunction FunctionExecutionResult(
+                            isSuccess = false,
+                            resultSummary = "No recipient provided for phone call.",
+                            error = "Missing recipient"
+                        )
+                    }
+
+                    if (!hasPermission(Manifest.permission.CALL_PHONE)) {
+                        return@DynamicFunction FunctionExecutionResult(
+                            isSuccess = false,
+                            resultSummary = "Placing direct phone calls requires Phone Call permission.",
+                            requiresPermission = true,
+                            missingPermission = Manifest.permission.CALL_PHONE,
+                            error = "Missing CALL_PHONE permission"
+                        )
+                    }
+
+                    val res = directCallManager.processVoiceCallCommand("call $recipient")
+                    if (res.isHandled && res.callIntent != null) {
                         context.startActivity(res.callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         FunctionExecutionResult(
                             isSuccess = true,
                             resultSummary = res.feedbackMessage
                         )
-                    } catch (e: Exception) {
+                    } else {
                         FunctionExecutionResult(
-                            isSuccess = false,
-                            resultSummary = "Failed to launch phone dialer: ${e.message}",
-                            error = e.message
+                            isSuccess = true,
+                            resultSummary = res.feedbackMessage
                         )
                     }
-                } else {
+                } catch (e: Exception) {
+                    Log.e(tag, "Error placing phone call: ${e.message}", e)
                     FunctionExecutionResult(
-                        isSuccess = true,
-                        resultSummary = res.feedbackMessage
+                        isSuccess = false,
+                        resultSummary = "Failed to place call: ${e.localizedMessage}",
+                        error = e.message
                     )
                 }
             }
         )
 
-        // 4. SMS Message Dispatch
+        // 5. SMS Message Dispatch
         register(
             DynamicFunction(
                 name = "send_text_message",
@@ -245,37 +392,57 @@ class DynamicFunctionRegistry(
                     )
                 )
             ) { args ->
-                val destination = args["destinationNumber"]?.toString() ?: ""
-                val text = args["messageText"]?.toString() ?: ""
-                if (destination.isBlank() || text.isBlank()) {
-                    return@DynamicFunction FunctionExecutionResult(
-                        isSuccess = false,
-                        resultSummary = "Destination number and message text cannot be empty.",
-                        error = "Invalid arguments"
+                try {
+                    val destination = args["destinationNumber"]?.toString() ?: ""
+                    val text = args["messageText"]?.toString() ?: ""
+                    if (destination.isBlank() || text.isBlank()) {
+                        return@DynamicFunction FunctionExecutionResult(
+                            isSuccess = false,
+                            resultSummary = "Destination number and message text cannot be empty.",
+                            error = "Invalid arguments"
+                        )
+                    }
+
+                    if (!hasPermission(Manifest.permission.SEND_SMS)) {
+                        return@DynamicFunction FunctionExecutionResult(
+                            isSuccess = false,
+                            resultSummary = "Sending SMS messages requires SMS permission.",
+                            requiresPermission = true,
+                            missingPermission = Manifest.permission.SEND_SMS,
+                            error = "Missing SEND_SMS permission"
+                        )
+                    }
+
+                    val result = smsSender.sendSms(
+                        destinationNumber = destination,
+                        messageText = text,
+                        cooldownMinutes = 0,
+                        bypassCooldown = true
                     )
-                }
-                val result = smsSender.sendSms(
-                    destinationNumber = destination,
-                    messageText = text,
-                    cooldownMinutes = 0,
-                    bypassCooldown = true
-                )
-                if (result is com.example.telephony.SendSmsResult.Success) {
-                    FunctionExecutionResult(
-                        isSuccess = true,
-                        resultSummary = "SMS message sent to $destination."
-                    )
-                } else {
+                    if (result is com.example.telephony.SendSmsResult.Success) {
+                        FunctionExecutionResult(
+                            isSuccess = true,
+                            resultSummary = "SMS message sent to $destination."
+                        )
+                    } else {
+                        FunctionExecutionResult(
+                            isSuccess = false,
+                            resultSummary = "Failed to dispatch SMS: ${(result as? com.example.telephony.SendSmsResult.Failure)?.reason}",
+                            error = "SMS dispatch failure"
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(tag, "Error sending SMS: ${e.message}", e)
                     FunctionExecutionResult(
                         isSuccess = false,
-                        resultSummary = "Failed to dispatch SMS: ${(result as? com.example.telephony.SendSmsResult.Failure)?.reason}",
-                        error = "SMS dispatch failure"
+                        resultSummary = "Failed to send SMS: ${e.localizedMessage}",
+                        error = e.message
                     )
                 }
             }
         )
 
-        // 5. Emergency SOS & Location Broadcast
+        // 6. Emergency SOS & Location Broadcast
         register(
             DynamicFunction(
                 name = "trigger_emergency_sos",
@@ -290,15 +457,24 @@ class DynamicFunctionRegistry(
                     )
                 )
             ) { args ->
-                val res = emergencySosManager.processVoiceSosCommand("send emergency sos help")
-                FunctionExecutionResult(
-                    isSuccess = res.isHandled,
-                    resultSummary = res.feedbackMessage
-                )
+                try {
+                    val res = emergencySosManager.processVoiceSosCommand("send emergency sos help")
+                    FunctionExecutionResult(
+                        isSuccess = res.isHandled,
+                        resultSummary = res.feedbackMessage
+                    )
+                } catch (e: Exception) {
+                    Log.e(tag, "Error triggering SOS: ${e.message}", e)
+                    FunctionExecutionResult(
+                        isSuccess = false,
+                        resultSummary = "Failed to trigger SOS: ${e.localizedMessage}",
+                        error = e.message
+                    )
+                }
             }
         )
 
-        // 6. Camera & Hands-Free Capture
+        // 7. Camera & Hands-Free Capture
         register(
             DynamicFunction(
                 name = "control_camera",
@@ -313,23 +489,42 @@ class DynamicFunctionRegistry(
                     )
                 )
             ) { args ->
-                val action = args["action"]?.toString() ?: "take_photo"
-                val voiceCommand = when (action) {
-                    "take_selfie" -> "take a selfie"
-                    "switch_camera" -> "switch camera"
-                    "start_video" -> "start recording video"
-                    "stop_video" -> "stop recording video"
-                    else -> "take a photo"
+                try {
+                    if (!hasPermission(Manifest.permission.CAMERA)) {
+                        return@DynamicFunction FunctionExecutionResult(
+                            isSuccess = false,
+                            resultSummary = "Camera control requires Camera permission.",
+                            requiresPermission = true,
+                            missingPermission = Manifest.permission.CAMERA,
+                            error = "Missing CAMERA permission"
+                        )
+                    }
+
+                    val action = args["action"]?.toString() ?: "take_photo"
+                    val voiceCommand = when (action) {
+                        "take_selfie" -> "take a selfie"
+                        "switch_camera" -> "switch camera"
+                        "start_video" -> "start recording video"
+                        "stop_video" -> "stop recording video"
+                        else -> "take a photo"
+                    }
+                    val res = maxCameraManager.processVoiceCameraCommand(voiceCommand)
+                    FunctionExecutionResult(
+                        isSuccess = res.isHandled,
+                        resultSummary = res.feedbackMessage
+                    )
+                } catch (e: Exception) {
+                    Log.e(tag, "Error controlling camera: ${e.message}", e)
+                    FunctionExecutionResult(
+                        isSuccess = false,
+                        resultSummary = "Camera error: ${e.localizedMessage}",
+                        error = e.message
+                    )
                 }
-                val res = maxCameraManager.processVoiceCameraCommand(voiceCommand)
-                FunctionExecutionResult(
-                    isSuccess = res.isHandled,
-                    resultSummary = res.feedbackMessage
-                )
             }
         )
 
-        // 7. Accessibility UI Navigation & Auto-Scroll
+        // 8. Accessibility UI Navigation & Auto-Scroll
         register(
             DynamicFunction(
                 name = "navigate_accessibility",
@@ -344,16 +539,25 @@ class DynamicFunctionRegistry(
                     )
                 )
             ) { args ->
-                val action = args["action"]?.toString() ?: "scroll_down"
-                val res = MaxAccessibilityService.processVoiceAccessibilityCommand(action.replace("_", " "))
-                FunctionExecutionResult(
-                    isSuccess = res.isHandled,
-                    resultSummary = res.feedbackMessage
-                )
+                try {
+                    val action = args["action"]?.toString() ?: "scroll_down"
+                    val res = MaxAccessibilityService.processVoiceAccessibilityCommand(action.replace("_", " "))
+                    FunctionExecutionResult(
+                        isSuccess = res.isHandled,
+                        resultSummary = res.feedbackMessage
+                    )
+                } catch (e: Exception) {
+                    Log.e(tag, "Error executing accessibility navigation: ${e.message}", e)
+                    FunctionExecutionResult(
+                        isSuccess = false,
+                        resultSummary = "Accessibility navigation error: ${e.localizedMessage}",
+                        error = e.message
+                    )
+                }
             }
         )
 
-        // 8. Device Status Query (Battery, Time, Date)
+        // 9. Device Status Query (Battery, Time, Date)
         register(
             DynamicFunction(
                 name = "query_device_status",
@@ -368,35 +572,44 @@ class DynamicFunctionRegistry(
                     )
                 )
             ) { args ->
-                val queryType = args["queryType"]?.toString() ?: "battery"
-                when (queryType) {
-                    "battery" -> {
-                        val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-                        val level = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-                        val isCharging = (bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS) == BatteryManager.BATTERY_STATUS_CHARGING)
-                        val status = if (isCharging) "charging" else "discharging"
-                        FunctionExecutionResult(
+                try {
+                    val queryType = args["queryType"]?.toString() ?: "battery"
+                    when (queryType) {
+                        "battery" -> {
+                            val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                            val level = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+                            val isCharging = (bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS) == BatteryManager.BATTERY_STATUS_CHARGING)
+                            val status = if (isCharging) "charging" else "discharging"
+                            FunctionExecutionResult(
+                                isSuccess = true,
+                                resultSummary = "Battery level is currently $level% ($status)."
+                            )
+                        }
+                        "time" -> {
+                            val formatted = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
+                            FunctionExecutionResult(
+                                isSuccess = true,
+                                resultSummary = "The current time is $formatted."
+                            )
+                        }
+                        "date" -> {
+                            val formatted = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(Date())
+                            FunctionExecutionResult(
+                                isSuccess = true,
+                                resultSummary = "Today is $formatted."
+                            )
+                        }
+                        else -> FunctionExecutionResult(
                             isSuccess = true,
-                            resultSummary = "Battery level is currently $level% ($status)."
+                            resultSummary = "Device system operational."
                         )
                     }
-                    "time" -> {
-                        val formatted = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
-                        FunctionExecutionResult(
-                            isSuccess = true,
-                            resultSummary = "The current time is $formatted."
-                        )
-                    }
-                    "date" -> {
-                        val formatted = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(Date())
-                        FunctionExecutionResult(
-                            isSuccess = true,
-                            resultSummary = "Today is $formatted."
-                        )
-                    }
-                    else -> FunctionExecutionResult(
-                        isSuccess = true,
-                        resultSummary = "Device system operational."
+                } catch (e: Exception) {
+                    Log.e(tag, "Error querying device status: ${e.message}", e)
+                    FunctionExecutionResult(
+                        isSuccess = false,
+                        resultSummary = "Error reading device status: ${e.localizedMessage}",
+                        error = e.message
                     )
                 }
             }

@@ -841,12 +841,23 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             if (dynamicActionPlanner.canDecomposeDynamically(spokenText)) {
                 val plan = dynamicActionPlanner.formulateLocalActionPlan(spokenText)
                 if (plan.steps.isNotEmpty()) {
-                    val execResult = dynamicActionPlanner.executePlan(plan)
+                    _sttPipelineStatus.value = "⚡ Formulating dynamic plan (${plan.steps.size} steps)..."
+                    
+                    val execResult = dynamicActionPlanner.executePlan(
+                        plan = plan,
+                        onStepStarting = { step ->
+                            _sttPipelineStatus.value = "▶ Step ${step.stepIndex + 1}/${plan.steps.size}: ${step.description}..."
+                        },
+                        onStepFinished = { step, res ->
+                            val statusIcon = if (res.requiresPermission) "⚠️" else if (res.isSuccess) "✓" else "✕"
+                            _sttPipelineStatus.value = "$statusIcon [${step.stepIndex + 1}/${plan.steps.size}] ${step.description}: ${res.resultSummary}"
+                        }
+                    )
                     val feedback = execResult.resultSummary
 
                     _isGeminiProcessing.value = false
                     _latestAssistantResponse.value = feedback
-                    _sttPipelineStatus.value = "⚡ Dynamic Sequence Executed (${plan.steps.size} actions): $feedback"
+                    _sttPipelineStatus.value = "⚡ Sequence Completed (${plan.steps.size} actions): $feedback"
 
                     com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, "DYNAMIC_ACTION_PLAN")
                     com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
