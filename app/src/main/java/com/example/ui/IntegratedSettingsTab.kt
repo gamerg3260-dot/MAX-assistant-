@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
@@ -315,13 +316,12 @@ private fun MainSettingsScreen(
 
         // --- CATEGORY CARD 1: VOICE AI ---
         CategoryNavigationCard(
-            title = "Voice AI & Barge-In",
-            subtitle = "Real-Time Interruption, Language, Pitch, Rate, AI Engine & Bi-directional WebSocket",
+            title = "Voice AI",
+            subtitle = "Dedicated Voice AI Sub-Screen: Real-Time Barge-In, Language, Pitch, Rate, Engines & WebSocket",
             badges = listOf(
                 if (settings.isBargeInEnabled) "Barge-In Active" else "Barge-In Off",
-                if (settings.isRealtimeWebSocketEnabled) "WebSocket Low-Latency" else "Standard REST",
-                settings.voiceLanguage,
-                settings.voiceResponseStyle
+                if (settings.isRealtimeWebSocketEnabled) "WebSocket Active" else "REST Mode",
+                settings.voiceLanguage
             ),
             icon = Icons.Default.RecordVoiceOver,
             iconTint = theme.primaryAccent,
@@ -332,8 +332,8 @@ private fun MainSettingsScreen(
 
         // --- CATEGORY CARD 2: HARDWARE ---
         CategoryNavigationCard(
-            title = "Hardware & Audio I/O",
-            subtitle = "Microphone Source, Speaker Output, Sensitivity, Equalizer & Device Radios",
+            title = "Hardware",
+            subtitle = "Dedicated Hardware Sub-Screen: Microphone Source, Speaker I/O, Sensitivity, Equalizer & Radios",
             badges = listOf(
                 settings.microphoneSource,
                 settings.speakerOutput,
@@ -346,15 +346,14 @@ private fun MainSettingsScreen(
             onClick = { onNavigate(SettingsSubScreen.HARDWARE) }
         )
 
-        // --- CATEGORY CARD 3: SECURITY & SOS ---
+        // --- CATEGORY CARD 3: SECURITY ---
         CategoryNavigationCard(
-            title = "Security & SOS",
-            subtitle = "Loud Anti-Theft Siren, Intruder Selfie Capture, Voice ID & Emergency SOS",
+            title = "Security",
+            subtitle = "Dedicated Security Sub-Screen: Anti-Theft Siren, Intruder Selfie Capture, Voice ID & Emergency SOS",
             badges = listOf(
                 if (settings.isAntiTheftSirenEnabled) "Loud Siren Active" else "Siren Off",
                 if (settings.isIntruderSelfieCaptureEnabled) "Intruder Selfie On" else "Selfie Off",
-                if (settings.isMotionDetectionAlarmEnabled) "Motion Sensor Armed" else "Motion Standby",
-                if (settings.isVoiceIdEnabled) "Voice ID Active" else "Voice ID Off"
+                if (settings.isMotionDetectionAlarmEnabled) "Motion Armed" else "Motion Standby"
             ),
             icon = Icons.Default.Security,
             iconTint = Color(0xFFFF5252),
@@ -865,6 +864,154 @@ private fun VoiceAiSettingsSubScreen(
                         color = theme.primaryAccent,
                         fontWeight = FontWeight.Medium
                     )
+                }
+            }
+        }
+
+        // --- 4B. CALLER ANNOUNCER & DYNAMIC PHONE NUMBER SPEECH (TTS-SPAN) ---
+        var testPhoneInput by remember { mutableStateOf("+1 (800) 555-0199") }
+        SiriGlassCard(theme = theme) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Call,
+                        contentDescription = null,
+                        tint = theme.primaryAccent,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Caller Announcer & Dynamic Phone Speech",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Natural digit sequence cadence via PhoneNumberUtils & TtsSpan",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.65f)
+                        )
+                    }
+                }
+
+                // Accept & Reject Command Toggles
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Accept Toggle Card
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF10B981).copy(alpha = if (settings.isVoiceAcceptCommandsEnabled) 0.2f else 0.05f))
+                            .border(
+                                1.dp,
+                                if (settings.isVoiceAcceptCommandsEnabled) Color(0xFF10B981).copy(alpha = 0.6f) else Color.White.copy(alpha = 0.1f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable { viewModel.toggleVoiceAcceptCommands(!settings.isVoiceAcceptCommandsEnabled) }
+                            .padding(10.dp)
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Voice Accept", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Switch(
+                                    checked = settings.isVoiceAcceptCommandsEnabled,
+                                    onCheckedChange = { viewModel.toggleVoiceAcceptCommands(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFF10B981)
+                                    )
+                                )
+                            }
+                            Text(
+                                text = if (settings.isVoiceAcceptCommandsEnabled) "Announces & listens for 'Accept'" else "Accept disabled",
+                                fontSize = 10.sp,
+                                color = if (settings.isVoiceAcceptCommandsEnabled) Color(0xFF10B981) else Color.Gray
+                            )
+                        }
+                    }
+
+                    // Reject Toggle Card
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFEF4444).copy(alpha = if (settings.isVoiceRejectCommandsEnabled) 0.2f else 0.05f))
+                            .border(
+                                1.dp,
+                                if (settings.isVoiceRejectCommandsEnabled) Color(0xFFEF4444).copy(alpha = 0.6f) else Color.White.copy(alpha = 0.1f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable { viewModel.toggleVoiceRejectCommands(!settings.isVoiceRejectCommandsEnabled) }
+                            .padding(10.dp)
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Voice Reject", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Switch(
+                                    checked = settings.isVoiceRejectCommandsEnabled,
+                                    onCheckedChange = { viewModel.toggleVoiceRejectCommands(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFFEF4444)
+                                    )
+                                )
+                            }
+                            Text(
+                                text = if (settings.isVoiceRejectCommandsEnabled) "Announces & listens for 'Reject'" else "Reject disabled",
+                                fontSize = 10.sp,
+                                color = if (settings.isVoiceRejectCommandsEnabled) Color(0xFFEF4444) else Color.Gray
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = testPhoneInput,
+                    onValueChange = { testPhoneInput = it },
+                    label = { Text("Sample Phone Number", color = Color.White.copy(alpha = 0.6f)) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = theme.primaryAccent,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Button(
+                    onClick = { viewModel.testPhoneNumberAnnouncement(testPhoneInput) },
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = "Test Phone Speech",
+                        tint = Color.Black,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Preview Dynamic Phone Announcement", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
         }
@@ -2358,92 +2505,123 @@ private fun CategoryNavigationCard(
             .clip(RoundedCornerShape(22.dp))
             .clickable(
                 role = androidx.compose.ui.semantics.Role.Button,
+                onClickLabel = "Open $title sub-screen",
                 onClick = onClick
             )
             .testTag(testTag)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(iconTint.copy(alpha = 0.18f))
+                            .border(1.dp, iconTint.copy(alpha = 0.35f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = title,
+                            tint = iconTint,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = title,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = subtitle,
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.65f),
+                            maxLines = 2
+                        )
+                    }
+                }
+
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
-                        .background(iconTint.copy(alpha = 0.18f))
-                        .border(1.dp, iconTint.copy(alpha = 0.35f), CircleShape),
+                        .background(iconTint.copy(alpha = 0.15f))
+                        .border(1.dp, iconTint.copy(alpha = 0.3f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = icon,
-                        contentDescription = title,
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Open $title Screen",
                         tint = iconTint,
                         modifier = Modifier.size(22.dp)
                     )
                 }
+            }
 
-                Spacer(modifier = Modifier.width(14.dp))
-
-                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Text(
-                        text = title,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = subtitle,
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.6f),
-                        maxLines = 2
-                    )
-                    if (badges.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+            // Bottom Badges & Open Screen Action Pill
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    badges.take(3).forEach { badge ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
                         ) {
-                            badges.take(3).forEach { badge ->
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color.White.copy(alpha = 0.08f))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = badge,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = iconTint
-                                    )
-                                }
-                            }
+                            Text(
+                                text = badge,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = iconTint
+                            )
                         }
                     }
                 }
-            }
 
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.08f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Open $title Screen",
-                    tint = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.size(20.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Configure",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = iconTint
+                    )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
     }

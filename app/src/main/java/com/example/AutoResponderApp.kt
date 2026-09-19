@@ -87,6 +87,9 @@ class AutoResponderApp : Application() {
     lateinit var maxRealtimeWebSocketManager: com.example.ai.MaxRealtimeWebSocketManager
         private set
 
+    lateinit var localVoiceCommandRouter: com.example.voice.LocalVoiceCommandRouter
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -123,6 +126,14 @@ class AutoResponderApp : Application() {
         openWakeWordDetector = com.example.voice.OpenWakeWordDetector(this)
         intruderSecurityManager = com.example.security.IntruderSecurityManager.getInstance(this)
         speakerVerificationManager = com.example.biometrics.SpeakerVerificationManager.getInstance(this)
+        localVoiceCommandRouter = com.example.voice.LocalVoiceCommandRouter(
+            context = this,
+            directCallManager = directCallManager,
+            appLauncherManager = appLauncherManager,
+            deviceToggleManager = deviceToggleManager,
+            emergencySosManager = emergencySosManager,
+            maxCameraManager = maxCameraManager
+        )
     }
 
     companion object {

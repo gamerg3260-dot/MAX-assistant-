@@ -376,7 +376,13 @@ class MaxAssistantForegroundService : Service() {
                         onDone = {
                             // Step 2: Immediate transition to Speech Recognition
                             if (settings.isVoiceCallControlEnabled && !isCallHandled) {
-                                startVoiceRecognitionForIncomingCall(settings.acceptKeywords, settings.rejectKeywords, settings.autoListenTimeoutSeconds)
+                                startVoiceRecognitionForIncomingCall(
+                                    acceptKeys = settings.acceptKeywords,
+                                    rejectKeys = settings.rejectKeywords,
+                                    timeout = settings.autoListenTimeoutSeconds,
+                                    isAcceptEnabled = settings.isVoiceAcceptCommandsEnabled,
+                                    isRejectEnabled = settings.isVoiceRejectCommandsEnabled
+                                )
                             } else {
                                 audioManagerHelper.releaseVoiceAssistantAudioFocus()
                             }
@@ -385,7 +391,13 @@ class MaxAssistantForegroundService : Service() {
                 } else if (settings.isVoiceCallControlEnabled) {
                     // Start voice recognition immediately without announcement
                     audioManagerHelper.requestVoiceAssistantAudioFocus()
-                    startVoiceRecognitionForIncomingCall(settings.acceptKeywords, settings.rejectKeywords, settings.autoListenTimeoutSeconds)
+                    startVoiceRecognitionForIncomingCall(
+                        acceptKeys = settings.acceptKeywords,
+                        rejectKeys = settings.rejectKeywords,
+                        timeout = settings.autoListenTimeoutSeconds,
+                        isAcceptEnabled = settings.isVoiceAcceptCommandsEnabled,
+                        isRejectEnabled = settings.isVoiceRejectCommandsEnabled
+                    )
                 }
             }
 
@@ -407,18 +419,27 @@ class MaxAssistantForegroundService : Service() {
         }
     }
 
-    private fun startVoiceRecognitionForIncomingCall(acceptKeys: String, rejectKeys: String, timeout: Int) {
+    private fun startVoiceRecognitionForIncomingCall(
+        acceptKeys: String,
+        rejectKeys: String,
+        timeout: Int,
+        isAcceptEnabled: Boolean = true,
+        isRejectEnabled: Boolean = true
+    ) {
         _liveVoiceState.value = "Listening: Say 'Accept' or 'Reject'..."
         voiceDetector.startListening(
             timeoutSeconds = timeout,
             customAcceptKeywords = acceptKeys,
-            customRejectKeywords = rejectKeys
+            customRejectKeywords = rejectKeys,
+            isAcceptEnabled = isAcceptEnabled,
+            isRejectEnabled = isRejectEnabled
         )
     }
 
     private fun stopVoicePipelines() {
         announcer.stop()
         voiceDetector.stopListening()
+        openWakeWordDetector?.stopListening()
         audioManagerHelper.releaseVoiceAssistantAudioFocus()
         _liveVoiceState.value = "Idle"
     }

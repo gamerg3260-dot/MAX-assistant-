@@ -67,6 +67,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val directCallManager = app.directCallManager
     val intruderSecurityManager = app.intruderSecurityManager
     val speakerVerificationManager = app.speakerVerificationManager
+    val localVoiceCommandRouter = app.localVoiceCommandRouter
     val realtimeAudioPlayer = app.realtimeAudioPlayer
     val realtimeBargeInManager = app.realtimeBargeInManager
     val maxRealtimeWebSocketManager = app.maxRealtimeWebSocketManager
@@ -238,6 +239,36 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         speakingTts || speakingNative || speakingOrb
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    // State tracking for Accept / Reject toggles and Caller Announcer state changes
+    private val _toggleFeedbackEvent = MutableStateFlow<ToggleFeedback?>(null)
+    val toggleFeedbackEvent: StateFlow<ToggleFeedback?> = _toggleFeedbackEvent.asStateFlow()
+
+    fun notifyToggleState(title: String, isEnabled: Boolean, speakOutLoud: Boolean = true) {
+        val stateText = if (isEnabled) "enabled" else "disabled"
+        val confirmationText = "$title is now ${if (isEnabled) "ENABLED" else "DISABLED"}"
+        _toggleFeedbackEvent.value = ToggleFeedback(
+            title = title,
+            isEnabled = isEnabled,
+            message = confirmationText
+        )
+        if (speakOutLoud) {
+            val speech = "$title $stateText"
+            audioManagerHelper.requestVoiceAssistantAudioFocus()
+            announcer.speak(
+                text = speech,
+                speechRate = 1.05f,
+                speechPitch = 1.0f,
+                onDone = {
+                    audioManagerHelper.releaseVoiceAssistantAudioFocus()
+                }
+            )
+        }
+    }
+
+    fun clearToggleFeedback() {
+        _toggleFeedbackEvent.value = null
+    }
+
     init {
         // Sync barge-in settings
         viewModelScope.launch {
@@ -290,20 +321,37 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun toggleMaxAssistant(enabled: Boolean) {
+        val context = getApplication<Application>()
         settingsRepo.setMaxAssistantEnabled(enabled)
         if (enabled) {
-            MaxAssistantForegroundService.startService(getApplication())
+            MaxAssistantForegroundService.startService(context)
+            if (PermissionHelper.canDrawOverlays(context)) {
+                com.example.overlay.MaxOverlayService.showOverlay(context)
+            }
         } else {
-            MaxAssistantForegroundService.stopService(getApplication())
+            MaxAssistantForegroundService.stopService(context)
+            com.example.overlay.MaxOverlayService.hideOverlay(context)
         }
     }
 
     fun toggleCallAnnouncer(enabled: Boolean) {
         settingsRepo.setCallAnnouncerEnabled(enabled)
+        notifyToggleState("Caller Voice Announcer", enabled)
     }
 
     fun toggleVoiceCallControl(enabled: Boolean) {
         settingsRepo.setVoiceCallControlEnabled(enabled)
+        notifyToggleState("Voice Call Control", enabled)
+    }
+
+    fun toggleVoiceAcceptCommands(enabled: Boolean) {
+        settingsRepo.setVoiceAcceptCommandsEnabled(enabled)
+        notifyToggleState("Voice Accept Command", enabled)
+    }
+
+    fun toggleVoiceRejectCommands(enabled: Boolean) {
+        settingsRepo.setVoiceRejectCommandsEnabled(enabled)
+        notifyToggleState("Voice Reject Command", enabled)
     }
 
     fun setAnnouncementTemplate(template: String) {
@@ -332,15 +380,18 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
 
     fun setAutoSpeakerphoneOnAccept(enabled: Boolean) {
         settingsRepo.setAutoSpeakerphoneOnAccept(enabled)
+        notifyToggleState("Auto-Speakerphone on Accept", enabled)
     }
 
     // Blocklist & Spam Management
     fun toggleBlocklist(enabled: Boolean) {
         settingsRepo.setBlocklistEnabled(enabled)
+        notifyToggleState("Call Blocklist", enabled)
     }
 
     fun toggleAutoRejectSpam(enabled: Boolean) {
         settingsRepo.setAutoRejectSpam(enabled)
+        notifyToggleState("Auto-Reject Spam Calls", enabled)
     }
 
     fun toggleBlockUnknownNumbers(enabled: Boolean) {
@@ -752,188 +803,115 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 maxRealtimeWebSocketManager.sendInterruptSignal()
             }
 
-            // 1. Direct Calling Intent (Immediate ACTION_CALL, No UI/Confirmation Delay)
-            val callRes = directCallManager.processVoiceCallCommand(spokenText)
-            if (callRes.isHandled) {
-                val feedback = callRes.feedbackMessage
-                _isGeminiProcessing.value = false
-                _latestAssistantResponse.value = feedback
-                _sttPipelineStatus.value = "Direct Call: $feedback"
-
-                com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, "DIRECT_CALL")
-                com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
-
-                val currentList = _sttConversationLog.value.toMutableList()
-                currentList.add(Pair(spokenText, feedback))
-                _sttConversationLog.value = currentList
-
-                swaraTtsService.speak(feedback)
-                return@launch
-            }
-
-            // 2. Check for Emergency SOS & Live Location voice commands
-            val sosRes = emergencySosManager.processVoiceSosCommand(spokenText)
-            if (sosRes.isHandled) {
-                val feedback = sosRes.feedbackMessage
-                _isGeminiProcessing.value = false
-                _latestAssistantResponse.value = feedback
-                _sttPipelineStatus.value = "Emergency SOS Action: $feedback"
-
-                val currentList = _sttConversationLog.value.toMutableList()
-                currentList.add(Pair(spokenText, feedback))
-                _sttConversationLog.value = currentList
-
-                swaraTtsService.speak(feedback)
-                return@launch
-            }
-
-            // 2. Check for Camera & Selfie Trigger voice commands
-            val cameraRes = maxCameraManager.processVoiceCameraCommand(spokenText)
-            if (cameraRes.isHandled) {
-                val feedback = cameraRes.feedbackMessage
-                _isGeminiProcessing.value = false
-                _latestAssistantResponse.value = feedback
-                _sttPipelineStatus.value = "Camera Action: $feedback"
-
-                val currentList = _sttConversationLog.value.toMutableList()
-                currentList.add(Pair(spokenText, feedback))
-                _sttConversationLog.value = currentList
-
-                swaraTtsService.speak(feedback)
-                return@launch
-            }
-
-            // 2. Check for Accessibility Auto-Scroll & Auto-Type voice commands
-            val accessRes = com.example.accessibility.MaxAccessibilityService.processVoiceAccessibilityCommand(spokenText)
-            if (accessRes.isHandled) {
-                val feedback = accessRes.feedbackMessage
-                _isGeminiProcessing.value = false
-                _latestAssistantResponse.value = feedback
-                _sttPipelineStatus.value = "Accessibility Action: $feedback"
-
-                val currentList = _sttConversationLog.value.toMutableList()
-                currentList.add(Pair(spokenText, feedback))
-                _sttConversationLog.value = currentList
-
-                swaraTtsService.speak(feedback)
-                return@launch
-            }
-
-            // 2. Check for Quick Settings / Hardware Toggle voice commands
-            val voiceToggleRes = deviceToggleManager.processVoiceToggleCommand(spokenText)
-            if (voiceToggleRes.isHandled) {
-                val feedback = voiceToggleRes.feedbackMessage
-                _isGeminiProcessing.value = false
-                _latestAssistantResponse.value = feedback
-                _sttPipelineStatus.value = "Hardware Action: $feedback"
-
-                com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, "HARDWARE_TOGGLE")
-                com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
-
-                val currentList = _sttConversationLog.value.toMutableList()
-                currentList.add(Pair(spokenText, feedback))
-                _sttConversationLog.value = currentList
-
-                swaraTtsService.speak(feedback)
-                return@launch
-            }
-
-            // 3. Check for App Launch voice commands (e.g. "Open YouTube", "YouTube kholo", "Launch WhatsApp")
-            val appLaunchRes = appLauncherManager.processVoiceAppLaunchCommand(spokenText)
-            if (appLaunchRes.isHandled) {
-                val feedback = appLaunchRes.feedbackMessage
-                _isGeminiProcessing.value = false
-                _latestAssistantResponse.value = feedback
-                _sttPipelineStatus.value = "App Launcher: $feedback"
-
-                com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, "APP_LAUNCH")
-                com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
-
-                val currentList = _sttConversationLog.value.toMutableList()
-                currentList.add(Pair(spokenText, feedback))
-                _sttConversationLog.value = currentList
-
-                val intentToLaunch = appLaunchRes.launchIntent
-                if (intentToLaunch != null) {
-                    swaraTtsService.speak(feedback, onDone = {
-                        appLauncherManager.launchIntentNow(intentToLaunch)
-                    })
-                    viewModelScope.launch {
-                        kotlinx.coroutines.delay(1200)
-                        appLauncherManager.launchIntentNow(intentToLaunch)
-                    }
-                } else {
-                    swaraTtsService.speak(feedback)
-                }
-                return@launch
-            }
-
-            _sttPipelineStatus.value = "User: \"$spokenText\" -> Streaming Gemini AI..."
-            _isGeminiProcessing.value = true
-
-            // Activate real-time barge-in Voice Activity Detection
-            realtimeBargeInManager.startMonitoring { reason ->
-                _isGeminiProcessing.value = false
-                _isVoiceOrbSpeaking.value = false
-                _voiceOrbStatus.value = "⚡ Interrupted ($reason). Listening to your new input..."
-                _sttPipelineStatus.value = "⚡ Barge-In triggered: listening for new speech..."
-                startVoiceOrbListening()
-            }
-
-            var fullText = ""
-            var isFirstChunk = true
-
-            try {
-                if (settings.value.isRealtimeWebSocketEnabled && maxRealtimeWebSocketManager.isConnected.value) {
-                    _voiceOrbStatus.value = "Live WebSocket: $spokenText"
-                    maxRealtimeWebSocketManager.sendTextMessage(spokenText)
-                }
-
-                geminiService.streamMaxVoiceResponse(
-                    userQuery = spokenText,
-                    settings = settings.value
-                ).collect { chunk ->
+            // 1. Evaluate via Local Command Router (Direct Device Actions & Fast Local Intent Execution)
+            when (val routeResult = localVoiceCommandRouter.routeCommand(spokenText)) {
+                is com.example.voice.CommandRouteResult.LocalAction -> {
+                    val feedback = routeResult.feedbackMessage
                     _isGeminiProcessing.value = false
-                    _isVoiceOrbSpeaking.value = true
-                    fullText += chunk
-                    _latestAssistantResponse.value = fullText
-                    _voiceOrbStatus.value = "MAX: $fullText"
-                    _sttPipelineStatus.value = "Speaking via MAX Native TTS (Barge-in active)..."
+                    _latestAssistantResponse.value = feedback
+                    _sttPipelineStatus.value = "⚡ Local Action (${routeResult.actionType}): $feedback"
 
-                    maxNativeTTS.speakChunk(chunk, isFirstChunk)
-                    isFirstChunk = false
-                }
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, routeResult.actionType)
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
 
-                if (fullText.isNotBlank()) {
-                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText)
-                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", fullText)
                     val currentList = _sttConversationLog.value.toMutableList()
-                    currentList.add(Pair(spokenText, fullText))
+                    currentList.add(Pair(spokenText, feedback))
                     _sttConversationLog.value = currentList
-                } else {
-                    val fallbackMsg = if (!SecureKeyManager.hasValidApiKey(getApplication())) {
-                        "Gemini API key is not configured. Please save your API key in Settings."
+
+                    val intentToLaunch = routeResult.launchIntent
+                    val postAction = routeResult.postSpeechAction
+
+                    if (intentToLaunch != null || postAction != null) {
+                        swaraTtsService.speak(feedback, onDone = {
+                            postAction?.invoke()
+                            if (intentToLaunch != null) {
+                                appLauncherManager.launchIntentNow(intentToLaunch)
+                            }
+                        })
+                        viewModelScope.launch {
+                            kotlinx.coroutines.delay(1200)
+                            postAction?.invoke()
+                            if (intentToLaunch != null) {
+                                appLauncherManager.launchIntentNow(intentToLaunch)
+                            }
+                        }
                     } else {
-                        "Sorry, I could not complete the request right now."
+                        swaraTtsService.speak(feedback)
                     }
-                    _latestAssistantResponse.value = fallbackMsg
-                    _voiceOrbStatus.value = fallbackMsg
-                    swaraTtsService.speak(fallbackMsg)
+                    return@launch
                 }
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) {
-                    Log.i(tag, "Streaming response cancelled cleanly by user barge-in.")
-                } else {
-                    Log.e(tag, "Error during Gemini streaming: ${e.message}", e)
-                    val err = "Error: ${e.localizedMessage ?: "Network error"}"
-                    _sttPipelineStatus.value = err
-                    _latestAssistantResponse.value = err
-                    swaraTtsService.speak(err)
+
+                is com.example.voice.CommandRouteResult.ComplexAiQuery -> {
+                    // 2. Route only complex queries to Gemini API for natural language reasoning
+                    val targetQuery = routeResult.cleanedQuery
+                    _sttPipelineStatus.value = "User: \"$targetQuery\" -> Streaming Gemini AI..."
+                    _isGeminiProcessing.value = true
+
+                    // Activate real-time barge-in Voice Activity Detection
+                    realtimeBargeInManager.startMonitoring { reason ->
+                        _isGeminiProcessing.value = false
+                        _isVoiceOrbSpeaking.value = false
+                        _voiceOrbStatus.value = "⚡ Interrupted ($reason). Listening to your new input..."
+                        _sttPipelineStatus.value = "⚡ Barge-In triggered: listening for new speech..."
+                        startVoiceOrbListening()
+                    }
+
+                    var fullText = ""
+                    var isFirstChunk = true
+
+                    try {
+                        if (settings.value.isRealtimeWebSocketEnabled && maxRealtimeWebSocketManager.isConnected.value) {
+                            _voiceOrbStatus.value = "Live WebSocket: $targetQuery"
+                            maxRealtimeWebSocketManager.sendTextMessage(targetQuery)
+                        }
+
+                        geminiService.streamMaxVoiceResponse(
+                            userQuery = targetQuery,
+                            settings = settings.value
+                        ).collect { chunk ->
+                            _isGeminiProcessing.value = false
+                            _isVoiceOrbSpeaking.value = true
+                            fullText += chunk
+                            _latestAssistantResponse.value = fullText
+                            _voiceOrbStatus.value = "MAX: $fullText"
+                            _sttPipelineStatus.value = "Speaking via MAX Native TTS (Barge-in active)..."
+
+                            maxNativeTTS.speakChunk(chunk, isFirstChunk)
+                            isFirstChunk = false
+                        }
+
+                        if (fullText.isNotBlank()) {
+                            com.example.ai.ConversationContextManager.getInstance().addTurn("user", targetQuery)
+                            com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", fullText)
+                            val currentList = _sttConversationLog.value.toMutableList()
+                            currentList.add(Pair(targetQuery, fullText))
+                            _sttConversationLog.value = currentList
+                        } else {
+                            val fallbackMsg = if (!SecureKeyManager.hasValidApiKey(getApplication())) {
+                                "Gemini API key is not configured. Please save your API key in Settings."
+                            } else {
+                                "Sorry, I could not complete the request right now."
+                            }
+                            _latestAssistantResponse.value = fallbackMsg
+                            _voiceOrbStatus.value = fallbackMsg
+                            swaraTtsService.speak(fallbackMsg)
+                        }
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) {
+                            Log.i(tag, "Streaming response cancelled cleanly by user barge-in.")
+                        } else {
+                            Log.e(tag, "Error during Gemini streaming: ${e.message}", e)
+                            val err = "Error: ${e.localizedMessage ?: "Network error"}"
+                            _sttPipelineStatus.value = err
+                            _latestAssistantResponse.value = err
+                            swaraTtsService.speak(err)
+                        }
+                    } finally {
+                        _isGeminiProcessing.value = false
+                        realtimeBargeInManager.stopMonitoring()
+                        openWakeWordDetector.resumeListening()
+                    }
                 }
-            } finally {
-                _isGeminiProcessing.value = false
-                realtimeBargeInManager.stopMonitoring()
-                openWakeWordDetector.resumeListening()
             }
         }
     }
@@ -1624,4 +1602,30 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         _sttPipelineStatus.value = "⚡ Barge-in simulated: Speech interrupted."
         startVoiceOrbListening()
     }
+
+    /**
+     * Previews telephone caller announcement with natural digit grouping and TtsSpan telephone styling.
+     */
+    fun testPhoneNumberAnnouncement(sampleNumber: String = "+1 (800) 555-0199") {
+        val s = settings.value
+        audioManagerHelper.requestVoiceAssistantAudioFocus()
+        announcer.announceCaller(
+            callerNameOrNumber = sampleNumber,
+            template = s.announcementTemplate,
+            speechRate = s.ttsSpeechRate,
+            speechPitch = s.ttsPitch,
+            repeatCount = s.announcementRepeatCount,
+            onDone = {
+                audioManagerHelper.releaseVoiceAssistantAudioFocus()
+            }
+        )
+    }
 }
+
+data class ToggleFeedback(
+    val title: String,
+    val isEnabled: Boolean,
+    val message: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+

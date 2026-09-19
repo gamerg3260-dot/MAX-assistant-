@@ -174,13 +174,21 @@ class MaxOverlayService : Service() {
         val action = intent?.action ?: ACTION_SHOW
         Log.d(TAG, "onStartCommand action=$action")
 
+        if (action == ACTION_HIDE) {
+            removeOverlayView()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         startForegroundWithNotification()
 
         when (action) {
-            ACTION_HIDE -> {
-                removeOverlayView()
-                stopSelf()
-            }
             ACTION_START_LISTENING -> {
                 showOverlayView()
                 triggerSpeechRecognition()
@@ -325,114 +333,95 @@ class MaxOverlayService : Service() {
                 val appInstance = com.example.AutoResponderApp.instance
                 val maxNativeTTS = appInstance.maxNativeTTS
 
-                // 1. Direct Calling Intent (Immediate ACTION_CALL, No UI/Confirmation Delay)
-                val directCallRes = appInstance.directCallManager.processVoiceCallCommand(spokenQuery)
-                if (directCallRes.isHandled) {
-                    val feedback = directCallRes.feedbackMessage
-                    _isProcessing.value = false
-                    _overlayStatus.value = "Direct Calling"
-                    _overlayResponse.value = feedback
-
-                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery, "DIRECT_CALL")
-                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
-
-                    maxNativeTTS.speak(feedback)
-                    openWakeWord.resumeListening()
-                    return@launch
-                }
-
-                // 2. App Launch commands
-                val appLaunchRes = appInstance.appLauncherManager.processVoiceAppLaunchCommand(spokenQuery)
-                if (appLaunchRes.isHandled) {
-                    val feedback = appLaunchRes.feedbackMessage
-                    _isProcessing.value = false
-                    _overlayStatus.value = "App Launcher"
-                    _overlayResponse.value = feedback
-
-                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery, "APP_LAUNCH")
-                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
-
-                    val intentToLaunch = appLaunchRes.launchIntent
-                    if (intentToLaunch != null) {
-                        maxNativeTTS.speak(feedback, onDone = {
-                            appInstance.appLauncherManager.launchIntentNow(intentToLaunch)
-                        })
-                        // Backup timer to guarantee launch if TTS onDone callback is skipped
-                        serviceScope.launch {
-                            kotlinx.coroutines.delay(1200)
-                            appInstance.appLauncherManager.launchIntentNow(intentToLaunch)
-                        }
-                    } else {
-                        maxNativeTTS.speak(feedback)
-                    }
-                    openWakeWord.resumeListening()
-                    return@launch
-                }
-
-                // 2. Hardware Toggle commands
-                val voiceToggleRes = appInstance.deviceToggleManager.processVoiceToggleCommand(spokenQuery)
-                if (voiceToggleRes.isHandled) {
-                    val feedback = voiceToggleRes.feedbackMessage
-                    _isProcessing.value = false
-                    _overlayStatus.value = "Hardware Control"
-                    _overlayResponse.value = feedback
-
-                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery, "HARDWARE_TOGGLE")
-                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
-
-                    maxNativeTTS.speak(feedback)
-                    openWakeWord.resumeListening()
-                    return@launch
-                }
-
-                val settings = settingsRepo.settings.value
-                val bargeInManager = appInstance.realtimeBargeInManager
-                var fullReply = ""
-                var isFirst = true
-
-                // Start real-time barge-in monitoring during overlay response
-                bargeInManager.startMonitoring { reason ->
-                    _isProcessing.value = false
-                    _isSpeaking.value = false
-                    _overlayStatus.value = "⚡ Barge-in: Listening..."
-                    triggerSpeechRecognition()
-                }
-
-                try {
-                    gemini.streamMaxVoiceResponse(spokenQuery, settings).collect { chunk ->
+                // 1. Evaluate via Local Command Router (0ms latency direct device actions & fast rules)
+                when (val routeResult = appInstance.localVoiceCommandRouter.routeCommand(spokenQuery)) {
+                    is com.example.voice.CommandRouteResult.LocalAction -> {
+                        val feedback = routeResult.feedbackMessage
                         _isProcessing.value = false
-                        _isSpeaking.value = true
-                        fullReply += chunk
-                        _overlayStatus.value = "MAX Assistant Response"
-                        _overlayResponse.value = fullReply
+                        _overlayStatus.value = "⚡ Local (${routeResult.actionType})"
+                        _overlayResponse.value = feedback
 
-                        maxNativeTTS.speakChunk(chunk, isFirst)
-                        isFirst = false
+                        com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery, routeResult.actionType)
+                        com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
+
+                        val intentToLaunch = routeResult.launchIntent
+                        val postAction = routeResult.postSpeechAction
+
+                        if (intentToLaunch != null || postAction != null) {
+                            maxNativeTTS.speak(feedback, onDone = {
+                                postAction?.invoke()
+                                if (intentToLaunch != null) {
+                                    appInstance.appLauncherManager.launchIntentNow(intentToLaunch)
+                                }
+                            })
+                            // Backup timer to guarantee launch if TTS onDone callback is skipped
+                            serviceScope.launch {
+                                kotlinx.coroutines.delay(1200)
+                                postAction?.invoke()
+                                if (intentToLaunch != null) {
+                                    appInstance.appLauncherManager.launchIntentNow(intentToLaunch)
+                                }
+                            }
+                        } else {
+                            maxNativeTTS.speak(feedback)
+                        }
+                        openWakeWord.resumeListening()
+                        return@launch
                     }
 
-                    if (fullReply.isNotBlank()) {
-                        com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery)
-                        com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", fullReply)
-                    } else {
-                        val fallback = "Sorry, I could not complete the request right now."
-                        _overlayResponse.value = fallback
-                        maxNativeTTS.speak(fallback)
+                    is com.example.voice.CommandRouteResult.ComplexAiQuery -> {
+                        // 2. Only complex queries are forwarded to Gemini API for reasoning
+                        val targetQuery = routeResult.cleanedQuery
+                        val settings = settingsRepo.settings.value
+                        val bargeInManager = appInstance.realtimeBargeInManager
+                        var fullReply = ""
+                        var isFirst = true
+
+                        // Start real-time barge-in monitoring during overlay response
+                        bargeInManager.startMonitoring { reason ->
+                            _isProcessing.value = false
+                            _isSpeaking.value = false
+                            _overlayStatus.value = "⚡ Barge-in: Listening..."
+                            triggerSpeechRecognition()
+                        }
+
+                        try {
+                            gemini.streamMaxVoiceResponse(targetQuery, settings).collect { chunk ->
+                                _isProcessing.value = false
+                                _isSpeaking.value = true
+                                fullReply += chunk
+                                _overlayStatus.value = "MAX Assistant Response"
+                                _overlayResponse.value = fullReply
+
+                                maxNativeTTS.speakChunk(chunk, isFirst)
+                                isFirst = false
+                            }
+
+                            if (fullReply.isNotBlank()) {
+                                com.example.ai.ConversationContextManager.getInstance().addTurn("user", targetQuery)
+                                com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", fullReply)
+                            } else {
+                                val fallback = "Sorry, I could not complete the request right now."
+                                _overlayResponse.value = fallback
+                                maxNativeTTS.speak(fallback)
+                            }
+                        } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) {
+                                Log.i(TAG, "Overlay voice stream interrupted by barge-in.")
+                            } else {
+                                val err = "Error: ${e.localizedMessage ?: "Unknown error"}"
+                                _overlayStatus.value = err
+                                _overlayResponse.value = err
+                                maxNativeTTS.speak(err)
+                            }
+                        } finally {
+                            _isProcessing.value = false
+                            _isSpeaking.value = false
+                            bargeInManager.stopMonitoring()
+                            _overlayStatus.value = "Say 'Okay Max' / 'Backup Max' / 'Hey Max'"
+                            openWakeWord.resumeListening()
+                        }
                     }
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) {
-                        Log.i(TAG, "Overlay voice stream interrupted by barge-in.")
-                    } else {
-                        val err = "Error: ${e.localizedMessage ?: "Unknown error"}"
-                        _overlayStatus.value = err
-                        _overlayResponse.value = err
-                        maxNativeTTS.speak(err)
-                    }
-                } finally {
-                    _isProcessing.value = false
-                    _isSpeaking.value = false
-                    bargeInManager.stopMonitoring()
-                    _overlayStatus.value = "Say 'Okay Max' / 'Backup Max' / 'Hey Max'"
-                    openWakeWord.resumeListening()
                 }
             }
         }

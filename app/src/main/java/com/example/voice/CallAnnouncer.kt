@@ -4,6 +4,11 @@ import android.content.Context
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.telephony.PhoneNumberUtils
+import android.text.SpannableString
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.TtsSpan
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,7 +18,8 @@ import java.util.UUID
 
 /**
  * Text-to-Speech engine for announcing incoming callers.
- * Handles audio parameters, repeat cadence, and UtteranceProgressListener to coordinate with speech recognition.
+ * Handles audio parameters, repeat cadence, dynamic phone number formatting using PhoneNumberUtils and TtsSpan,
+ * and UtteranceProgressListener to coordinate with speech recognition and UI state.
  */
 class CallAnnouncer(private val context: Context) : TextToSpeech.OnInitListener {
     private val tag = "CallAnnouncer"
@@ -104,12 +110,12 @@ class CallAnnouncer(private val context: Context) : TextToSpeech.OnInitListener 
         repeatCount: Int = 1,
         onDone: (() -> Unit)? = null
     ) {
-        val announcementText = buildAnnouncementText(callerNameOrNumber, template, repeatCount)
-        speak(announcementText, speechRate, speechPitch, onDone)
+        val announcement = buildAnnouncementCharSequence(callerNameOrNumber, template, repeatCount)
+        speak(announcement, speechRate, speechPitch, onDone)
     }
 
     fun speak(
-        text: String,
+        text: CharSequence,
         speechRate: Float = 1.0f,
         speechPitch: Float = 1.0f,
         onDone: (() -> Unit)? = null
@@ -163,21 +169,97 @@ class CallAnnouncer(private val context: Context) : TextToSpeech.OnInitListener 
     }
 
     companion object {
+        /**
+         * Formats a caller identifier (name or raw phone number).
+         * If the input is a phone number, uses PhoneNumberUtils and TtsSpan.TelephoneBuilder
+         * to produce natural spoken digit cadence and prevent choppy digit-by-digit reading.
+         */
+        fun formatPhoneNumberForSpeech(rawInput: String, defaultCountryIso: String? = null): CharSequence {
+            val trimmed = rawInput.trim()
+            val digitsCount = trimmed.count { it.isDigit() }
+            val isPhoneLike = digitsCount >= 7 || trimmed.startsWith("+") ||
+                    (digitsCount >= 3 && (trimmed.contains("-") || trimmed.contains("(") || trimmed.contains(")")))
+
+            if (!isPhoneLike) {
+                return trimmed
+            }
+
+            val country = defaultCountryIso ?: Locale.getDefault().country.ifEmpty { "US" }
+            val formatted = PhoneNumberUtils.formatNumber(trimmed, country) ?: formatDigitsToSpokenGroups(trimmed)
+
+            val spannable = SpannableString(formatted)
+            try {
+                val ttsSpan = TtsSpan.TelephoneBuilder()
+                    .setNumberParts(formatted)
+                    .build()
+                spannable.setSpan(ttsSpan, 0, formatted.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            } catch (e: Exception) {
+                Log.w("CallAnnouncer", "Could not attach TtsSpan: ${e.message}")
+            }
+            return spannable
+        }
+
+        /**
+         * Fallback grouping for phone numbers to ensure TTS reads them as natural number chunks (e.g. area code, prefix, line)
+         * instead of robotic single-digit enumerations.
+         */
+        fun formatDigitsToSpokenGroups(number: String): String {
+            val clean = number.filter { it.isDigit() || it == '+' }
+            if (clean.length == 10 && !clean.startsWith("+")) {
+                return "${clean.substring(0, 3)}-${clean.substring(3, 6)}-${clean.substring(6)}"
+            } else if (clean.length == 11 && clean.startsWith("1")) {
+                return "+1 ${clean.substring(1, 4)}-${clean.substring(4, 7)}-${clean.substring(7)}"
+            } else if (clean.length > 6) {
+                return clean.chunked(3).joinToString(" ")
+            }
+            return number
+        }
+
+        /**
+         * Builds a styled CharSequence with natural telephone span formatting embedded in the announcement template.
+         */
+        fun buildAnnouncementCharSequence(
+            callerNameOrNumber: String,
+            template: String = "Incoming call from {name}",
+            repeatCount: Int = 1
+        ): CharSequence {
+            val formattedCaller = formatPhoneNumberForSpeech(callerNameOrNumber)
+            val singleAnnouncement = SpannableStringBuilder()
+
+            if (template.contains("{name}")) {
+                val parts = template.split("{name}")
+                if (parts.isNotEmpty()) {
+                    singleAnnouncement.append(parts[0])
+                    singleAnnouncement.append(formattedCaller)
+                    if (parts.size > 1) {
+                        singleAnnouncement.append(parts[1])
+                    }
+                } else {
+                    singleAnnouncement.append(formattedCaller)
+                }
+            } else {
+                singleAnnouncement.append("$template: ")
+                singleAnnouncement.append(formattedCaller)
+            }
+
+            val fullAnnouncement = SpannableStringBuilder()
+            val totalRepeats = repeatCount.coerceAtLeast(1)
+            for (i in 1..totalRepeats) {
+                if (i > 1) {
+                    fullAnnouncement.append(". ")
+                }
+                fullAnnouncement.append(singleAnnouncement)
+            }
+
+            return fullAnnouncement
+        }
+
         fun buildAnnouncementText(
             callerNameOrNumber: String,
             template: String = "Incoming call from {name}",
             repeatCount: Int = 1
         ): String {
-            val single = if (template.contains("{name}")) {
-                template.replace("{name}", callerNameOrNumber)
-            } else {
-                "$template: $callerNameOrNumber"
-            }
-            return if (repeatCount > 1) {
-                (1..repeatCount).joinToString(". ") { single }
-            } else {
-                single
-            }
+            return buildAnnouncementCharSequence(callerNameOrNumber, template, repeatCount).toString()
         }
     }
 }

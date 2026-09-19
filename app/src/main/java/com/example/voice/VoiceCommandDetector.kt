@@ -55,6 +55,8 @@ class VoiceCommandDetector(private val context: Context) {
     var onListeningEndedListener: (() -> Unit)? = null
 
     // Configurable keywords
+    var isAcceptEnabled: Boolean = true
+    var isRejectEnabled: Boolean = true
     var acceptKeywords: List<String> = listOf("accept", "receive", "answer", "yes", "pickup", "take call", "pick up")
     var rejectKeywords: List<String> = listOf("reject", "decline", "disconnect", "no", "ignore", "hang up", "cut call", "drop")
     var silenceKeywords: List<String> = listOf("silence", "mute", "quiet", "stop")
@@ -138,12 +140,12 @@ class VoiceCommandDetector(private val context: Context) {
             val phrase = rawPhrase.lowercase(Locale.ROOT).trim()
 
             // Check Accept keywords
-            if (acceptKeywords.any { phrase.contains(it) || it.contains(phrase) }) {
+            if (isAcceptEnabled && acceptKeywords.any { phrase.contains(it) || it.contains(phrase) }) {
                 return VoiceCommand.ACCEPT
             }
 
             // Check Reject keywords
-            if (rejectKeywords.any { phrase.contains(it) || it.contains(phrase) }) {
+            if (isRejectEnabled && rejectKeywords.any { phrase.contains(it) || it.contains(phrase) }) {
                 return VoiceCommand.REJECT
             }
 
@@ -171,7 +173,9 @@ class VoiceCommandDetector(private val context: Context) {
     fun startListening(
         timeoutSeconds: Int = 12,
         customAcceptKeywords: String? = null,
-        customRejectKeywords: String? = null
+        customRejectKeywords: String? = null,
+        isAcceptEnabled: Boolean? = null,
+        isRejectEnabled: Boolean? = null
     ) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             val errorMsg = "Microphone permission (RECORD_AUDIO) missing. Please grant microphone access."
@@ -179,6 +183,9 @@ class VoiceCommandDetector(private val context: Context) {
             onErrorListener?.invoke(errorMsg)
             return
         }
+
+        isAcceptEnabled?.let { this.isAcceptEnabled = it }
+        isRejectEnabled?.let { this.isRejectEnabled = it }
 
         customAcceptKeywords?.let {
             acceptKeywords = it.split(",").map { k -> k.trim().lowercase(Locale.ROOT) }.filter { k -> k.isNotEmpty() }

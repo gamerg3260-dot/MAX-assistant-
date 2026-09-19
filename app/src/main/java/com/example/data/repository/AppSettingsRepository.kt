@@ -20,6 +20,8 @@ data class AppSettings(
     val announceUnknownNumbers: Boolean = true,
 
     // Voice Command Controls
+    val isVoiceAcceptCommandsEnabled: Boolean = true,
+    val isVoiceRejectCommandsEnabled: Boolean = true,
     val acceptKeywords: String = "accept, receive, answer, yes, pickup",
     val rejectKeywords: String = "reject, decline, disconnect, no, ignore, hang up",
     val silenceKeywords: String = "silence, mute, quiet, stop",
@@ -110,6 +112,8 @@ class AppSettingsRepository(context: Context) {
             ttsPitch = prefs.getFloat("tts_pitch", 1.0f),
             announcementRepeatCount = prefs.getInt("announcement_repeat_count", 2),
             announceUnknownNumbers = prefs.getBoolean("announce_unknown_numbers", true),
+            isVoiceAcceptCommandsEnabled = prefs.getBoolean("is_voice_accept_commands_enabled", true),
+            isVoiceRejectCommandsEnabled = prefs.getBoolean("is_voice_reject_commands_enabled", true),
             acceptKeywords = prefs.getString("accept_keywords", "accept, receive, answer, yes, pickup") ?: "accept, receive, answer, yes, pickup",
             rejectKeywords = prefs.getString("reject_keywords", "reject, decline, disconnect, no, ignore, hang up") ?: "reject, decline, disconnect, no, ignore, hang up",
             silenceKeywords = prefs.getString("silence_keywords", "silence, mute, quiet, stop") ?: "silence, mute, quiet, stop",
@@ -189,6 +193,8 @@ class AppSettingsRepository(context: Context) {
             putFloat("tts_pitch", newSettings.ttsPitch)
             putInt("announcement_repeat_count", newSettings.announcementRepeatCount)
             putBoolean("announce_unknown_numbers", newSettings.announceUnknownNumbers)
+            putBoolean("is_voice_accept_commands_enabled", newSettings.isVoiceAcceptCommandsEnabled)
+            putBoolean("is_voice_reject_commands_enabled", newSettings.isVoiceRejectCommandsEnabled)
             putString("accept_keywords", newSettings.acceptKeywords)
             putString("reject_keywords", newSettings.rejectKeywords)
             putString("silence_keywords", newSettings.silenceKeywords)
@@ -284,6 +290,14 @@ class AppSettingsRepository(context: Context) {
 
     fun setAutoSpeakerphoneOnAccept(enabled: Boolean) {
         updateSettings(_settings.value.copy(autoSpeakerphoneOnAccept = enabled))
+    }
+
+    fun setVoiceAcceptCommandsEnabled(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isVoiceAcceptCommandsEnabled = enabled))
+    }
+
+    fun setVoiceRejectCommandsEnabled(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isVoiceRejectCommandsEnabled = enabled))
     }
 
     fun setAcceptKeywords(keywords: String) {

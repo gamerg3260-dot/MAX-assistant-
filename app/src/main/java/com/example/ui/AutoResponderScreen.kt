@@ -1150,6 +1150,10 @@ fun VoiceCallAnnouncerTab(
     settings: AppSettings,
     theme: SiriThemeColors
 ) {
+    val toggleFeedback by viewModel.toggleFeedbackEvent.collectAsState()
+    var testNumberInput by remember { mutableStateOf("+1 (800) 555-0199") }
+    var testNameInput by remember { mutableStateOf("Sarah Connor") }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -1159,6 +1163,71 @@ fun VoiceCallAnnouncerTab(
     ) {
         item {
             SiriSectionHeader(title = "Voice Call Announcer & Control", icon = Icons.Default.RecordVoiceOver, theme = theme)
+        }
+
+        // Animated Toggle State Change Visual Confirmation Banner
+        toggleFeedback?.let { feedback ->
+            item {
+                LaunchedEffect(feedback.timestamp) {
+                    kotlinx.coroutines.delay(4000)
+                    viewModel.clearToggleFeedback()
+                }
+
+                SiriGlassCard(theme = theme) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(
+                                        if (feedback.isEnabled) Color(0xFF10B981).copy(alpha = 0.2f) else Color(0xFFEF4444).copy(alpha = 0.2f),
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (feedback.isEnabled) Icons.Default.CheckCircle else Icons.Default.Close,
+                                    contentDescription = null,
+                                    tint = if (feedback.isEnabled) Color(0xFF10B981) else Color(0xFFEF4444),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "State Updated & Announced via TTS",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = theme.primaryAccent
+                                )
+                                Text(
+                                    text = feedback.message,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                        IconButton(onClick = { viewModel.clearToggleFeedback() }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Dismiss",
+                                tint = Color.LightGray,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         item {
@@ -1179,7 +1248,7 @@ fun VoiceCallAnnouncerTab(
         item {
             SiriToggleCard(
                 title = "Caller Voice Announcer",
-                subtitle = "Speak caller name using Text-To-Speech on incoming call",
+                subtitle = "Speak caller name & dynamically formatted phone numbers naturally on incoming call",
                 icon = Icons.AutoMirrored.Filled.VolumeUp,
                 checked = settings.isCallAnnouncerEnabled,
                 theme = theme,
@@ -1189,13 +1258,140 @@ fun VoiceCallAnnouncerTab(
 
         item {
             SiriToggleCard(
-                title = "Voice Command Call Control",
-                subtitle = "Listen for 'Accept' or 'Reject' spoken commands",
+                title = "Voice Command Call Control (Master)",
+                subtitle = "Listen for spoken commands to handle incoming calls hands-free",
                 icon = Icons.Default.Mic,
                 checked = settings.isVoiceCallControlEnabled,
                 theme = theme,
                 onCheckedChange = { viewModel.toggleVoiceCallControl(it) }
             )
+        }
+
+        // Granular Accept & Reject Toggle Controls
+        item {
+            SiriGlassCard(theme = theme) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Accept / Reject Command Toggles",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Toggling buttons triggers real-time spoken TTS announcements and state tracking",
+                        fontSize = 12.sp,
+                        color = Color.LightGray
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1E293B).copy(alpha = 0.6f))
+                            .clickable { viewModel.toggleVoiceAcceptCommands(!settings.isVoiceAcceptCommandsEnabled) }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(Color(0xFF10B981).copy(alpha = 0.2f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Call,
+                                    contentDescription = null,
+                                    tint = Color(0xFF10B981),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Voice Accept Commands",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = if (settings.isVoiceAcceptCommandsEnabled) "Active ('Accept', 'Answer', 'Yes')" else "Inactive (Disabled)",
+                                    fontSize = 11.sp,
+                                    color = if (settings.isVoiceAcceptCommandsEnabled) Color(0xFF10B981) else Color.Gray
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = settings.isVoiceAcceptCommandsEnabled,
+                            onCheckedChange = { viewModel.toggleVoiceAcceptCommands(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF10B981)
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1E293B).copy(alpha = 0.6f))
+                            .clickable { viewModel.toggleVoiceRejectCommands(!settings.isVoiceRejectCommandsEnabled) }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(Color(0xFFEF4444).copy(alpha = 0.2f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CallEnd,
+                                    contentDescription = null,
+                                    tint = Color(0xFFEF4444),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Voice Reject Commands",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = if (settings.isVoiceRejectCommandsEnabled) "Active ('Reject', 'Decline', 'No')" else "Inactive (Disabled)",
+                                    fontSize = 11.sp,
+                                    color = if (settings.isVoiceRejectCommandsEnabled) Color(0xFFEF4444) else Color.Gray
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = settings.isVoiceRejectCommandsEnabled,
+                            onCheckedChange = { viewModel.toggleVoiceRejectCommands(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFFEF4444)
+                            )
+                        )
+                    }
+                }
+            }
         }
 
         item {
@@ -1207,6 +1403,60 @@ fun VoiceCallAnnouncerTab(
                 theme = theme,
                 onCheckedChange = { viewModel.setAutoSpeakerphoneOnAccept(it) }
             )
+        }
+
+        // Dynamic Phone Number Formatting & Speech Preview Card
+        item {
+            SiriGlassCard(theme = theme) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Call, contentDescription = null, tint = theme.primaryAccent)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Dynamic Phone Number Speech (TtsSpan)",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = "Phone numbers are formatted via PhoneNumberUtils and TtsSpan.TelephoneBuilder to ensure natural digit sequence speech instead of robotic digit-by-digit stutters.",
+                        fontSize = 12.sp,
+                        color = Color.LightGray
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = testNumberInput,
+                        onValueChange = { testNumberInput = it },
+                        label = { Text("Sample Phone Number (e.g. +1 800-555-0199)", color = Color.LightGray) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = theme.primaryAccent,
+                            unfocusedBorderColor = Color.Gray,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Button(
+                        onClick = { viewModel.testPhoneNumberAnnouncement(testNumberInput) },
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Play Phone Announcement", tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Preview Phone Number Spoken Cadence", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
 
         item {
@@ -1255,15 +1505,30 @@ fun VoiceCallAnnouncerTab(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    OutlinedTextField(
+                        value = testNameInput,
+                        onValueChange = { testNameInput = it },
+                        label = { Text("Sample Caller Name", color = Color.LightGray) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = theme.secondaryAccent,
+                            unfocusedBorderColor = Color.Gray,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
                     Button(
-                        onClick = { viewModel.testTtsVoice("Sarah Connor") },
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
+                        onClick = { viewModel.testTtsVoice(testNameInput) },
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Test Voice", tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Preview Caller Announcement", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Preview Caller Name Announcement", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 }
             }
