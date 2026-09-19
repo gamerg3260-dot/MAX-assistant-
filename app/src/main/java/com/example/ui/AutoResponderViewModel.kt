@@ -67,6 +67,20 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val directCallManager = app.directCallManager
     val intruderSecurityManager = app.intruderSecurityManager
     val speakerVerificationManager = app.speakerVerificationManager
+    val realtimeAudioPlayer = app.realtimeAudioPlayer
+    val realtimeBargeInManager = app.realtimeBargeInManager
+    val maxRealtimeWebSocketManager = app.maxRealtimeWebSocketManager
+
+    // Real-Time Barge-In & WebSocket Reactive State Flows
+    val isBargeInMonitoring: StateFlow<Boolean> = realtimeBargeInManager.isMonitoring
+    val isBargeInInterrupted: StateFlow<Boolean> = realtimeBargeInManager.isInterrupted
+    val bargeInCount: StateFlow<Int> = realtimeBargeInManager.bargeInCount
+    val bargeInCurrentMicDb: StateFlow<Float> = realtimeBargeInManager.currentMicDb
+    val lastBargeInReason: StateFlow<String?> = realtimeBargeInManager.lastInterruptionReason
+    val isRealtimeWebSocketConnected: StateFlow<Boolean> = maxRealtimeWebSocketManager.isConnected
+    val realtimeLatencyMs: StateFlow<Long> = maxRealtimeWebSocketManager.latencyMs
+    val realtimeConnectionState = maxRealtimeWebSocketManager.connectionState
+    val isStreamingWebSocketAudio = maxRealtimeWebSocketManager.isStreamingAudio
 
     val failedUnlockCount: StateFlow<Int> = intruderSecurityManager.failedUnlockCount
     val lastFailedTimestamp: StateFlow<Long?> = intruderSecurityManager.lastFailedTimestamp
@@ -225,6 +239,14 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
+        // Sync barge-in settings
+        viewModelScope.launch {
+            settingsRepo.settings.collect { currentSettings ->
+                realtimeBargeInManager.setBargeInEnabled(currentSettings.isBargeInEnabled)
+                realtimeBargeInManager.setSensitivity(currentSettings.bargeInSensitivity)
+            }
+        }
+
         // Setup in-app voice detector listeners for test workbench
         voiceDetector.onCommandListener = { cmd, raw ->
             viewModelScope.launch {
@@ -711,6 +733,8 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         processSttUserQuery(trimmed)
     }
 
+    private var activeVoiceResponseJob: kotlinx.coroutines.Job? = null
+
     /**
      * Processes recognized user speech or typed text query:
      * First checks hardware toggles -> fallback to Gemini AI -> TTS playback.
@@ -718,8 +742,15 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     fun processSttUserQuery(spokenText: String) {
         if (spokenText.isBlank()) return
 
-        viewModelScope.launch {
+        activeVoiceResponseJob?.cancel()
+        activeVoiceResponseJob = viewModelScope.launch {
             _isGeminiProcessing.value = true
+
+            // Register generation cancellation hook for real-time barge-in interruption
+            realtimeBargeInManager.activeGenerationCancellationCallback = {
+                activeVoiceResponseJob?.cancel()
+                maxRealtimeWebSocketManager.sendInterruptSignal()
+            }
 
             // 1. Direct Calling Intent (Immediate ACTION_CALL, No UI/Confirmation Delay)
             val callRes = directCallManager.processVoiceCallCommand(spokenText)
@@ -840,10 +871,24 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
             _sttPipelineStatus.value = "User: \"$spokenText\" -> Streaming Gemini AI..."
             _isGeminiProcessing.value = true
 
+            // Activate real-time barge-in Voice Activity Detection
+            realtimeBargeInManager.startMonitoring { reason ->
+                _isGeminiProcessing.value = false
+                _isVoiceOrbSpeaking.value = false
+                _voiceOrbStatus.value = "⚡ Interrupted ($reason). Listening to your new input..."
+                _sttPipelineStatus.value = "⚡ Barge-In triggered: listening for new speech..."
+                startVoiceOrbListening()
+            }
+
             var fullText = ""
             var isFirstChunk = true
 
             try {
+                if (settings.value.isRealtimeWebSocketEnabled && maxRealtimeWebSocketManager.isConnected.value) {
+                    _voiceOrbStatus.value = "Live WebSocket: $spokenText"
+                    maxRealtimeWebSocketManager.sendTextMessage(spokenText)
+                }
+
                 geminiService.streamMaxVoiceResponse(
                     userQuery = spokenText,
                     settings = settings.value
@@ -853,7 +898,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                     fullText += chunk
                     _latestAssistantResponse.value = fullText
                     _voiceOrbStatus.value = "MAX: $fullText"
-                    _sttPipelineStatus.value = "Speaking via MAX Native TTS..."
+                    _sttPipelineStatus.value = "Speaking via MAX Native TTS (Barge-in active)..."
 
                     maxNativeTTS.speakChunk(chunk, isFirstChunk)
                     isFirstChunk = false
@@ -876,13 +921,18 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                     swaraTtsService.speak(fallbackMsg)
                 }
             } catch (e: Exception) {
-                Log.e(tag, "Error during Gemini streaming: ${e.message}", e)
-                val err = "Error: ${e.localizedMessage ?: "Network error"}"
-                _sttPipelineStatus.value = err
-                _latestAssistantResponse.value = err
-                swaraTtsService.speak(err)
+                if (e is kotlinx.coroutines.CancellationException) {
+                    Log.i(tag, "Streaming response cancelled cleanly by user barge-in.")
+                } else {
+                    Log.e(tag, "Error during Gemini streaming: ${e.message}", e)
+                    val err = "Error: ${e.localizedMessage ?: "Network error"}"
+                    _sttPipelineStatus.value = err
+                    _latestAssistantResponse.value = err
+                    swaraTtsService.speak(err)
+                }
             } finally {
                 _isGeminiProcessing.value = false
+                realtimeBargeInManager.stopMonitoring()
                 openWakeWordDetector.resumeListening()
             }
         }
@@ -1536,5 +1586,42 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
 
     fun deleteVoiceProfile() {
         speakerVerificationManager.deleteVoiceProfile()
+    }
+
+    // Real-Time Barge-In & WebSocket Methods
+    fun setBargeInEnabled(enabled: Boolean) {
+        settingsRepo.setBargeInEnabled(enabled)
+        realtimeBargeInManager.setBargeInEnabled(enabled)
+    }
+
+    fun setBargeInSensitivity(sensitivity: Float) {
+        settingsRepo.setBargeInSensitivity(sensitivity)
+        realtimeBargeInManager.setSensitivity(sensitivity)
+    }
+
+    fun setBargeInMode(mode: String) {
+        settingsRepo.setBargeInMode(mode)
+    }
+
+    fun setRealtimeWebSocketEnabled(enabled: Boolean) {
+        settingsRepo.setRealtimeWebSocketEnabled(enabled)
+        if (enabled) {
+            maxRealtimeWebSocketManager.connect()
+        } else {
+            maxRealtimeWebSocketManager.disconnect()
+        }
+    }
+
+    fun setBargeInSoundFeedback(enabled: Boolean) {
+        settingsRepo.setBargeInSoundFeedback(enabled)
+    }
+
+    fun simulateBargeInInterrupt() {
+        realtimeBargeInManager.simulateBargeIn()
+        _isVoiceOrbSpeaking.value = false
+        _isVoiceOrbListening.value = true
+        _voiceOrbStatus.value = "⚡ Barge-in Test: Interrupted! Listening to new speech..."
+        _sttPipelineStatus.value = "⚡ Barge-in simulated: Speech interrupted."
+        startVoiceOrbListening()
     }
 }

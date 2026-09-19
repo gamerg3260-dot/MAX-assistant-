@@ -51,6 +51,11 @@ data class AppSettings(
     val isDefaultVoiceAssistant: Boolean = true,
     val voiceLanguage: String = "Hindi (India)",
     val voiceResponseStyle: String = "Conversational",
+    val isBargeInEnabled: Boolean = true,
+    val bargeInSensitivity: Float = 0.75f,
+    val bargeInMode: String = "HYBRID_VAD_STT",
+    val isRealtimeWebSocketEnabled: Boolean = true,
+    val bargeInSoundFeedback: Boolean = true,
 
     // Hardware & Audio I/O Settings
     val microphoneSource: String = "Built-in Mic (Auto)",
@@ -131,6 +136,11 @@ class AppSettingsRepository(context: Context) {
             isDefaultVoiceAssistant = prefs.getBoolean("is_default_voice_assistant", true),
             voiceLanguage = prefs.getString("voice_language", "Hindi (India)") ?: "Hindi (India)",
             voiceResponseStyle = prefs.getString("voice_response_style", "Conversational") ?: "Conversational",
+            isBargeInEnabled = prefs.getBoolean("is_barge_in_enabled", true),
+            bargeInSensitivity = prefs.getFloat("barge_in_sensitivity", 0.75f),
+            bargeInMode = prefs.getString("barge_in_mode", "HYBRID_VAD_STT") ?: "HYBRID_VAD_STT",
+            isRealtimeWebSocketEnabled = prefs.getBoolean("is_realtime_websocket_enabled", true),
+            bargeInSoundFeedback = prefs.getBoolean("barge_in_sound_feedback", true),
 
             microphoneSource = prefs.getString("microphone_source", "Built-in Mic (Auto)") ?: "Built-in Mic (Auto)",
             speakerOutput = prefs.getString("speaker_output", "Auto (Speakerphone)") ?: "Auto (Speakerphone)",
@@ -205,6 +215,11 @@ class AppSettingsRepository(context: Context) {
             putBoolean("is_default_voice_assistant", newSettings.isDefaultVoiceAssistant)
             putString("voice_language", newSettings.voiceLanguage)
             putString("voice_response_style", newSettings.voiceResponseStyle)
+            putBoolean("is_barge_in_enabled", newSettings.isBargeInEnabled)
+            putFloat("barge_in_sensitivity", newSettings.bargeInSensitivity)
+            putString("barge_in_mode", newSettings.bargeInMode)
+            putBoolean("is_realtime_websocket_enabled", newSettings.isRealtimeWebSocketEnabled)
+            putBoolean("barge_in_sound_feedback", newSettings.bargeInSoundFeedback)
 
             putString("microphone_source", newSettings.microphoneSource)
             putString("speaker_output", newSettings.speakerOutput)
@@ -393,6 +408,26 @@ class AppSettingsRepository(context: Context) {
 
     fun setVoiceResponseStyle(style: String) {
         updateSettings(_settings.value.copy(voiceResponseStyle = style))
+    }
+
+    fun setBargeInEnabled(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isBargeInEnabled = enabled))
+    }
+
+    fun setBargeInSensitivity(sensitivity: Float) {
+        updateSettings(_settings.value.copy(bargeInSensitivity = sensitivity))
+    }
+
+    fun setBargeInMode(mode: String) {
+        updateSettings(_settings.value.copy(bargeInMode = mode))
+    }
+
+    fun setRealtimeWebSocketEnabled(enabled: Boolean) {
+        updateSettings(_settings.value.copy(isRealtimeWebSocketEnabled = enabled))
+    }
+
+    fun setBargeInSoundFeedback(enabled: Boolean) {
+        updateSettings(_settings.value.copy(bargeInSoundFeedback = enabled))
     }
 
     // Hardware Setters

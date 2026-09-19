@@ -315,12 +315,13 @@ private fun MainSettingsScreen(
 
         // --- CATEGORY CARD 1: VOICE AI ---
         CategoryNavigationCard(
-            title = "Voice AI",
-            subtitle = "Language, Default Assistant, Pitch, Speech Rate, AI Engine & Persona",
+            title = "Voice AI & Barge-In",
+            subtitle = "Real-Time Interruption, Language, Pitch, Rate, AI Engine & Bi-directional WebSocket",
             badges = listOf(
+                if (settings.isBargeInEnabled) "Barge-In Active" else "Barge-In Off",
+                if (settings.isRealtimeWebSocketEnabled) "WebSocket Low-Latency" else "Standard REST",
                 settings.voiceLanguage,
-                settings.voiceResponseStyle,
-                if (settings.isDefaultVoiceAssistant) "Default Assistant" else "Secondary"
+                settings.voiceResponseStyle
             ),
             icon = Icons.Default.RecordVoiceOver,
             iconTint = theme.primaryAccent,
@@ -967,6 +968,265 @@ private fun VoiceAiSettingsSubScreen(
                     ) {
                         Text("Save Instructions", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+        }
+
+        // --- 6. REAL-TIME BARGE-IN & BI-DIRECTIONAL WEBSOCKET ---
+        val isBargeInMonitoring by viewModel.isBargeInMonitoring.collectAsState()
+        val isBargeInInterrupted by viewModel.isBargeInInterrupted.collectAsState()
+        val bargeInCount by viewModel.bargeInCount.collectAsState()
+        val currentMicDb by viewModel.bargeInCurrentMicDb.collectAsState()
+        val lastInterruptionReason by viewModel.lastBargeInReason.collectAsState()
+        val isWsConnected by viewModel.isRealtimeWebSocketConnected.collectAsState()
+        val wsLatencyMs by viewModel.realtimeLatencyMs.collectAsState()
+
+        SiriGlassCard(theme = theme) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (settings.isBargeInEnabled) Color(0xFF00E5FF).copy(alpha = 0.2f)
+                                    else Color.White.copy(alpha = 0.08f)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GraphicEq,
+                                contentDescription = "Barge-in Icon",
+                                tint = if (settings.isBargeInEnabled) Color(0xFF00E5FF) else Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Real-Time Barge-In (Instant Interruption)",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                            Text(
+                                text = "Interrupt assistant playback immediately when you start speaking",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.65f)
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = settings.isBargeInEnabled,
+                        onCheckedChange = { isChecked -> viewModel.setBargeInEnabled(isChecked) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = Color(0xFF00E5FF)
+                        ),
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("settings_barge_in_switch")
+                    )
+                }
+
+                // WebSocket Full Duplex Streaming Toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "WebSocket",
+                                tint = if (settings.isRealtimeWebSocketEnabled) theme.primaryAccent else Color.Gray,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Bi-Directional WebSocket Streaming",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                        }
+                        Text(
+                            text = if (isWsConnected) "Connected (Latency: ${wsLatencyMs}ms)" else "Low-latency streaming socket connection",
+                            fontSize = 10.sp,
+                            color = if (isWsConnected) Color(0xFF00E676) else Color.White.copy(alpha = 0.6f)
+                        )
+                    }
+
+                    Switch(
+                        checked = settings.isRealtimeWebSocketEnabled,
+                        onCheckedChange = { isChecked -> viewModel.setRealtimeWebSocketEnabled(isChecked) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = theme.primaryAccent
+                        ),
+                        modifier = Modifier.minimumInteractiveComponentSize()
+                    )
+                }
+
+                // Sensitivity Slider
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Barge-In Sensitivity (VAD Threshold)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                        val sensitivityLabel = when {
+                            settings.bargeInSensitivity < 0.4f -> "Low (Loud Only)"
+                            settings.bargeInSensitivity < 0.7f -> "Medium"
+                            settings.bargeInSensitivity < 0.85f -> "High (Recommended)"
+                            else -> "Ultra Responsive"
+                        }
+                        Text(
+                            text = "$sensitivityLabel (${String.format("%.2f", settings.bargeInSensitivity)})",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00E5FF)
+                        )
+                    }
+
+                    Slider(
+                        value = settings.bargeInSensitivity,
+                        onValueChange = { newSens -> viewModel.setBargeInSensitivity(newSens) },
+                        valueRange = 0.2f..1.0f,
+                        steps = 8,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF00E5FF),
+                            activeTrackColor = Color(0xFF00E5FF),
+                            inactiveTrackColor = Color.White.copy(alpha = 0.15f)
+                        )
+                    )
+                }
+
+                // Live Barge-In Telemetry & Diagnostic Status Box
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                        .padding(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            when {
+                                                isBargeInInterrupted -> Color(0xFFFF5252)
+                                                isBargeInMonitoring -> Color(0xFF00E5FF)
+                                                else -> Color.Gray
+                                            }
+                                        )
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = when {
+                                        isBargeInInterrupted -> "BARGE-IN TRIGGERED"
+                                        isBargeInMonitoring -> "VAD ACTIVE (LISTENING ON PLAYBACK)"
+                                        else -> "STANDBY (IDLE)"
+                                    },
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = when {
+                                        isBargeInInterrupted -> Color(0xFFFF5252)
+                                        isBargeInMonitoring -> Color(0xFF00E5FF)
+                                        else -> Color.Gray
+                                    }
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.White.copy(alpha = 0.1f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "$bargeInCount Interrupts",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+
+                        if (lastInterruptionReason != null) {
+                            Text(
+                                text = "Last Interrupted: $lastInterruptionReason",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
+
+                        if (isBargeInMonitoring) {
+                            Text(
+                                text = "Live Mic RMS: ${String.format("%.1f dB", currentMicDb)}",
+                                fontSize = 10.sp,
+                                color = Color(0xFF00E5FF)
+                            )
+                        }
+                    }
+                }
+
+                // Interactive Test Barge-In Button
+                Button(
+                    onClick = { viewModel.simulateBargeInInterrupt() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF).copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.6f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FlashOn,
+                        contentDescription = "Simulate Interruption",
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Simulate Barge-In Speech Interruption",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }

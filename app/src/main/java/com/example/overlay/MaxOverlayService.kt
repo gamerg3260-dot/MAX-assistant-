@@ -386,8 +386,17 @@ class MaxOverlayService : Service() {
                 }
 
                 val settings = settingsRepo.settings.value
+                val bargeInManager = appInstance.realtimeBargeInManager
                 var fullReply = ""
                 var isFirst = true
+
+                // Start real-time barge-in monitoring during overlay response
+                bargeInManager.startMonitoring { reason ->
+                    _isProcessing.value = false
+                    _isSpeaking.value = false
+                    _overlayStatus.value = "⚡ Barge-in: Listening..."
+                    triggerSpeechRecognition()
+                }
 
                 try {
                     gemini.streamMaxVoiceResponse(spokenQuery, settings).collect { chunk ->
@@ -410,13 +419,18 @@ class MaxOverlayService : Service() {
                         maxNativeTTS.speak(fallback)
                     }
                 } catch (e: Exception) {
-                    val err = "Error: ${e.localizedMessage ?: "Unknown error"}"
-                    _overlayStatus.value = err
-                    _overlayResponse.value = err
-                    maxNativeTTS.speak(err)
+                    if (e is kotlinx.coroutines.CancellationException) {
+                        Log.i(TAG, "Overlay voice stream interrupted by barge-in.")
+                    } else {
+                        val err = "Error: ${e.localizedMessage ?: "Unknown error"}"
+                        _overlayStatus.value = err
+                        _overlayResponse.value = err
+                        maxNativeTTS.speak(err)
+                    }
                 } finally {
                     _isProcessing.value = false
                     _isSpeaking.value = false
+                    bargeInManager.stopMonitoring()
                     _overlayStatus.value = "Say 'Okay Max' / 'Backup Max' / 'Hey Max'"
                     openWakeWord.resumeListening()
                 }

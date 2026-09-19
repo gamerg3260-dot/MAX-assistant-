@@ -78,6 +78,15 @@ class AutoResponderApp : Application() {
     lateinit var directCallManager: com.example.telephony.DirectCallManager
         private set
 
+    lateinit var realtimeAudioPlayer: com.example.voice.RealtimeAudioPlayer
+        private set
+
+    lateinit var realtimeBargeInManager: com.example.voice.RealtimeBargeInManager
+        private set
+
+    lateinit var maxRealtimeWebSocketManager: com.example.ai.MaxRealtimeWebSocketManager
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -95,6 +104,18 @@ class AutoResponderApp : Application() {
         elevenLabsTtsService = com.example.voice.ElevenLabsTtsService(this)
         maxNativeTTS = com.example.voice.MAXNativeTTS(this)
         maxSttManager = com.example.voice.MaxSttManager(this)
+        realtimeAudioPlayer = com.example.voice.RealtimeAudioPlayer()
+        realtimeBargeInManager = com.example.voice.RealtimeBargeInManager(
+            context = this,
+            realtimeAudioPlayer = realtimeAudioPlayer,
+            maxNativeTTS = maxNativeTTS,
+            elevenLabsTtsService = elevenLabsTtsService,
+            callAnnouncer = callAnnouncer
+        )
+        maxRealtimeWebSocketManager = com.example.ai.MaxRealtimeWebSocketManager(
+            context = this,
+            realtimeAudioPlayer = realtimeAudioPlayer
+        )
         deviceToggleManager = com.example.toggle.DeviceToggleManager(this)
         emergencySosManager = com.example.sos.EmergencySosManager.getInstance(this)
         maxCameraManager = com.example.camera.MaxCameraManager.getInstance(this)
