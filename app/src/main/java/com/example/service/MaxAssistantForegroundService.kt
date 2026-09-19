@@ -74,6 +74,41 @@ class MaxAssistantForegroundService : Service() {
         setupWakeWordCallbacks()
         registerCallStateListener()
         startContinuousWakeWordListening()
+        observeSettingsChanges()
+    }
+
+    private var settingsJob: kotlinx.coroutines.Job? = null
+
+    private fun observeSettingsChanges() {
+        settingsJob = serviceScope.launch {
+            val app = application as? AutoResponderApp ?: AutoResponderApp.instance
+            var previousSettings: com.example.data.repository.AppSettings? = null
+
+            app.settingsRepository.settings.collect { current ->
+                val prev = previousSettings
+                if (prev != null) {
+                    // 1. Caller Announcer toggle switched OFF: immediately stop TTS
+                    if (prev.isCallAnnouncerEnabled && !current.isCallAnnouncerEnabled) {
+                        Log.i(TAG, "Call Announcer toggle switched OFF. Immediately halting announcer.")
+                        announcer.stop()
+                    }
+
+                    // 2. Voice Call Control toggle switched OFF: immediately stop listening
+                    if (prev.isVoiceCallControlEnabled && !current.isVoiceCallControlEnabled) {
+                        Log.i(TAG, "Voice Call Control toggle switched OFF. Stopping voice detector.")
+                        voiceDetector.stopListening()
+                        audioManagerHelper.releaseVoiceAssistantAudioFocus()
+                    }
+
+                    // 3. Master Assistant / Service toggle switched OFF: stop foreground service
+                    if (prev.isMaxAssistantEnabled && !current.isMaxAssistantEnabled) {
+                        Log.i(TAG, "Max Assistant Master toggle switched OFF. Stopping service.")
+                        stopForegroundService()
+                    }
+                }
+                previousSettings = current
+            }
+        }
     }
 
     private fun setupWakeWordCallbacks() {
@@ -446,6 +481,8 @@ class MaxAssistantForegroundService : Service() {
 
     private fun stopForegroundService() {
         Log.d(TAG, "Stopping MaxAssistantForegroundService...")
+        settingsJob?.cancel()
+        settingsJob = null
         stopVoicePipelines()
         announcer.shutdown()
         unregisterCallStateListener()

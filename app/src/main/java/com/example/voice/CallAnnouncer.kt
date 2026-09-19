@@ -110,6 +110,15 @@ class CallAnnouncer(private val context: Context) : TextToSpeech.OnInitListener 
         repeatCount: Int = 1,
         onDone: (() -> Unit)? = null
     ) {
+        // Strict toggle state validation: If Call Announcer toggle is disabled, immediately abort
+        val isEnabled = com.example.AutoResponderApp.instance.settingsRepository.settings.value.isCallAnnouncerEnabled
+        if (!isEnabled) {
+            Log.d(tag, "Caller announcer toggle is OFF. Aborting announcement.")
+            stop()
+            onDone?.invoke()
+            return
+        }
+
         val announcement = buildAnnouncementCharSequence(callerNameOrNumber, template, repeatCount)
         speak(announcement, speechRate, speechPitch, onDone)
     }

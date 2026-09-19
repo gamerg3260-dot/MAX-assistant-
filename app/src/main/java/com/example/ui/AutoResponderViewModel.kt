@@ -331,16 +331,40 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         } else {
             MaxAssistantForegroundService.stopService(context)
             com.example.overlay.MaxOverlayService.hideOverlay(context)
+            announcer.stop()
+            app.callAnnouncer.stop()
+            voiceDetector.stopListening()
+            audioManagerHelper.releaseVoiceAssistantAudioFocus()
         }
     }
 
     fun toggleCallAnnouncer(enabled: Boolean) {
         settingsRepo.setCallAnnouncerEnabled(enabled)
+        if (!enabled) {
+            announcer.stop()
+            app.callAnnouncer.stop()
+            if (_incomingCallSimState.value.phase == "ANNOUNCING") {
+                _incomingCallSimState.value = _incomingCallSimState.value.copy(
+                    phase = "RINGING",
+                    statusText = "Caller Announcer disabled. Phone is ringing..."
+                )
+            }
+        }
         notifyToggleState("Caller Voice Announcer", enabled)
     }
 
     fun toggleVoiceCallControl(enabled: Boolean) {
         settingsRepo.setVoiceCallControlEnabled(enabled)
+        if (!enabled) {
+            voiceDetector.stopListening()
+            if (_incomingCallSimState.value.phase == "LISTENING") {
+                _incomingCallSimState.value = _incomingCallSimState.value.copy(
+                    phase = "RINGING",
+                    statusText = "Voice Call Control disabled. Phone is ringing..."
+                )
+                audioManagerHelper.releaseVoiceAssistantAudioFocus()
+            }
+        }
         notifyToggleState("Voice Call Control", enabled)
     }
 
