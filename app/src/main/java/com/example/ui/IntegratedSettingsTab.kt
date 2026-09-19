@@ -542,10 +542,416 @@ private fun VoiceAiSettingsSubScreen(
         // Navigation Top Bar
         SubScreenTopBar(
             title = "Voice AI Settings",
-            subtitle = "Engine, Speech Tone, Pitch & Assistant Controls",
+            subtitle = "Edge NLU, Hybrid Pipeline, Engine & Tone Controls",
             theme = theme,
             onBack = onBack
         )
+
+        // --- 0. HYBRID AI & QUANTIZED EDGE NLU PIPELINE ---
+        val telemetry by viewModel.aiPipelineTelemetry.collectAsState()
+        SiriGlassCard(theme = theme) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(theme.primaryAccent.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "Hybrid Edge AI",
+                                tint = theme.primaryAccent,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Hybrid Edge AI & Intent Router",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Quantized INT8 Local NLU + 0ms Offline Routing",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.65f)
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF00E676).copy(alpha = 0.15f))
+                            .border(1.dp, Color(0xFF00E676).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "0ms Latency Mode",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00E676)
+                        )
+                    }
+                }
+
+                // Architecture Capabilities breakdown
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("• Device Toggles & Quick Settings", fontSize = 11.sp, color = Color.White.copy(alpha = 0.85f))
+                        Text("⚡ Edge AI (0ms Offline)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("• Phone Calls, SOS & Contacts", fontSize = 11.sp, color = Color.White.copy(alpha = 0.85f))
+                        Text("⚡ Edge AI (0ms Offline)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("• App Launching & Camera Capture", fontSize = 11.sp, color = Color.White.copy(alpha = 0.85f))
+                        Text("⚡ Edge AI (0ms Offline)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("• Generative Reasoning & Chat", fontSize = 11.sp, color = Color.White.copy(alpha = 0.85f))
+                        Text("🌐 Cloud Gemini 2.5", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64B5F6))
+                    }
+                }
+
+                // Live Pipeline Telemetry Display
+                if (telemetry.query.isNotBlank()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.primaryAccent.copy(alpha = 0.12f))
+                            .border(1.dp, theme.primaryAccent.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Last Query: \"${telemetry.query}\"",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "${telemetry.latencyMs}ms",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (telemetry.isOfflineExecuted) Color(0xFF00E676) else Color(0xFF64B5F6)
+                            )
+                        }
+                        Text(
+                            text = "Engine: ${telemetry.statusSummary}",
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.75f)
+                        )
+                        if (telemetry.extractedSlotsSummary.isNotBlank()) {
+                            Text(
+                                text = "Slots Extracted: ${telemetry.extractedSlotsSummary}",
+                                fontSize = 10.sp,
+                                color = theme.primaryAccent
+                            )
+                        }
+                    }
+                }
+
+                // Quick Offline Intent Verification Chips
+                Text(
+                    text = "Quick Offline Intent Tests (Instant 0ms Execution):",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val testQueries = listOf(
+                        "Turn on Flashlight",
+                        "Turn on Wi-Fi",
+                        "What is battery level?",
+                        "What time is it?",
+                        "Take a selfie",
+                        "Open YouTube"
+                    )
+                    for (q in testQueries) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                .clickable { viewModel.processSttUserQuery(q) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = q,
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 0.1 DYNAMIC FUNCTION EXECUTION FRAMEWORK & ACTION PLANNER ---
+        val activePlan by viewModel.activeActionPlan.collectAsState()
+        val allFunctions = remember { viewModel.dynamicFunctionRegistry.getAllFunctions() }
+
+        SiriGlassCard(theme = theme) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFFB300).copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Dynamic Function Execution",
+                                tint = Color(0xFFFFB300),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Dynamic Function Framework",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Action Sequence Formulator & Dynamic Tool Dispatcher",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.65f)
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFFFB300).copy(alpha = 0.15f))
+                            .border(1.dp, Color(0xFFFFB300).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "${allFunctions.size} Tools Registered",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFFB300)
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Allows MAX to evaluate novel composite queries, dynamically formulate multi-step action plans, and dispatch functions without pre-written hardcoded branch statements.",
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    color = Color.White.copy(alpha = 0.75f)
+                )
+
+                // Registered Dynamic Functions Grid / Badges
+                Text(
+                    text = "Callable Dynamic Tools:",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.3f))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    for (func in allFunctions.take(6)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(theme.primaryAccent)
+                                )
+                                Text(
+                                    text = func.name,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = 0.9f)
+                                )
+                            }
+                            Text(
+                                text = func.category.name.lowercase().replace("_", " "),
+                                fontSize = 9.sp,
+                                color = theme.primaryAccent.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                }
+
+                // Active / Last Plan Formulation Telemetry
+                activePlan?.let { plan ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.primaryAccent.copy(alpha = 0.12f))
+                            .border(1.dp, theme.primaryAccent.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Formulated Plan: ${plan.steps.size} Steps",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = plan.formulatedVia,
+                                fontSize = 9.sp,
+                                color = Color(0xFF00E676),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        for (step in plan.steps) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${step.stepIndex + 1}. ${step.description}",
+                                    fontSize = 10.sp,
+                                    color = Color.White.copy(alpha = 0.85f)
+                                )
+                                Text(
+                                    text = if (step.isExecuted) "✓ Executed" else "Pending",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (step.isExecuted) Color(0xFF00E676) else Color(0xFFFFB300)
+                                )
+                            }
+                        }
+
+                        if (plan.finalFeedbackMessage.isNotBlank()) {
+                            Text(
+                                text = "Summary: ${plan.finalFeedbackMessage}",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+
+                // Interactive Dynamic Composite Test Chips
+                Text(
+                    text = "Test Multi-Step Dynamic Actions:",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val compositeQueries = listOf(
+                        "Turn on flashlight and open YouTube",
+                        "Set volume to 80% and check battery",
+                        "Turn on Wi-Fi and take a selfie",
+                        "Set brightness to 90% and scroll down"
+                    )
+                    for (cq in compositeQueries) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFFFFB300).copy(alpha = 0.12f))
+                                .border(1.dp, Color(0xFFFFB300).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                .clickable { viewModel.processSttUserQuery(cq) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = cq,
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         // --- 1. DEFAULT VOICE ASSISTANT ---
         SiriGlassCard(theme = theme) {

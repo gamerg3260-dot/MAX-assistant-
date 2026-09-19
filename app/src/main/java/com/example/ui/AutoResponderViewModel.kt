@@ -179,6 +179,16 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     // System Overlay Service State
     val isOverlayActive: StateFlow<Boolean> = com.example.overlay.MaxOverlayService.isOverlayActive
 
+    // Hybrid AI Processing Pipeline & Edge NLU
+    val hybridAiPipeline = app.hybridAiPipeline
+    val aiPipelineTelemetry: StateFlow<com.example.ai.AiPipelineTelemetry> = hybridAiPipeline.telemetry
+
+    // Dynamic Function Execution Framework & Action Planner
+    val dynamicFunctionRegistry = app.dynamicFunctionRegistry
+    val dynamicActionPlanner = app.dynamicActionPlanner
+    val activeActionPlan: StateFlow<com.example.function.DynamicActionPlan?> = dynamicActionPlanner.activePlan
+    val lastDynamicExecutionSummary: StateFlow<String?> = dynamicActionPlanner.lastExecutionSummary
+
     // WhatsApp Control Manager
     val whatsAppManager = WhatsAppControlManager.instance
     val whatsAppMessages: StateFlow<List<WhatsAppMessage>> = whatsAppManager.messages
@@ -827,13 +837,39 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 maxRealtimeWebSocketManager.sendInterruptSignal()
             }
 
-            // 1. Evaluate via Local Command Router (Direct Device Actions & Fast Local Intent Execution)
+            // 0. Stage 0: Dynamic Function Execution Framework & Multi-Action Planner Check
+            if (dynamicActionPlanner.canDecomposeDynamically(spokenText)) {
+                val plan = dynamicActionPlanner.formulateLocalActionPlan(spokenText)
+                if (plan.steps.isNotEmpty()) {
+                    val execResult = dynamicActionPlanner.executePlan(plan)
+                    val feedback = execResult.resultSummary
+
+                    _isGeminiProcessing.value = false
+                    _latestAssistantResponse.value = feedback
+                    _sttPipelineStatus.value = "⚡ Dynamic Sequence Executed (${plan.steps.size} actions): $feedback"
+
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, "DYNAMIC_ACTION_PLAN")
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
+
+                    val currentList = _sttConversationLog.value.toMutableList()
+                    currentList.add(Pair(spokenText, feedback))
+                    _sttConversationLog.value = currentList
+
+                    swaraTtsService.speak(feedback)
+                    return@launch
+                }
+            }
+
+            // 1. Stage 1: Quantized Edge NLU Analysis & Slot Extraction (<2ms)
+            val edgeAnalysis = com.example.ai.edgenlu.QuantizedEdgeNluEngine.analyze(spokenText)
+
+            // 2. Stage 2: Evaluate via Local Command Router (Direct Device Actions & Fast Local Intent Execution)
             when (val routeResult = localVoiceCommandRouter.routeCommand(spokenText)) {
                 is com.example.voice.CommandRouteResult.LocalAction -> {
                     val feedback = routeResult.feedbackMessage
                     _isGeminiProcessing.value = false
                     _latestAssistantResponse.value = feedback
-                    _sttPipelineStatus.value = "⚡ Local Action (${routeResult.actionType}): $feedback"
+                    _sttPipelineStatus.value = "⚡ Edge AI [Offline ${edgeAnalysis.inferenceTimeMs}ms] (${routeResult.actionType}): $feedback"
 
                     com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, routeResult.actionType)
                     com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
@@ -866,9 +902,9 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 }
 
                 is com.example.voice.CommandRouteResult.ComplexAiQuery -> {
-                    // 2. Route only complex queries to Gemini API for natural language reasoning
+                    // 3. Stage 3: Route only complex / generative queries to Gemini Cloud API
                     val targetQuery = routeResult.cleanedQuery
-                    _sttPipelineStatus.value = "User: \"$targetQuery\" -> Streaming Gemini AI..."
+                    _sttPipelineStatus.value = "User: \"$targetQuery\" -> Delegating to Gemini Cloud LLM..."
                     _isGeminiProcessing.value = true
 
                     // Activate real-time barge-in Voice Activity Detection

@@ -87,7 +87,16 @@ class AutoResponderApp : Application() {
     lateinit var maxRealtimeWebSocketManager: com.example.ai.MaxRealtimeWebSocketManager
         private set
 
+    lateinit var dynamicFunctionRegistry: com.example.function.DynamicFunctionRegistry
+        private set
+
+    lateinit var dynamicActionPlanner: com.example.function.DynamicActionPlanner
+        private set
+
     lateinit var localVoiceCommandRouter: com.example.voice.LocalVoiceCommandRouter
+        private set
+
+    lateinit var hybridAiPipeline: com.example.ai.HybridAiProcessingPipeline
         private set
 
     override fun onCreate() {
@@ -126,6 +135,19 @@ class AutoResponderApp : Application() {
         openWakeWordDetector = com.example.voice.OpenWakeWordDetector(this)
         intruderSecurityManager = com.example.security.IntruderSecurityManager.getInstance(this)
         speakerVerificationManager = com.example.biometrics.SpeakerVerificationManager.getInstance(this)
+        
+        dynamicFunctionRegistry = com.example.function.DynamicFunctionRegistry(
+            context = this,
+            directCallManager = directCallManager,
+            appLauncherManager = appLauncherManager,
+            deviceToggleManager = deviceToggleManager,
+            emergencySosManager = emergencySosManager,
+            maxCameraManager = maxCameraManager,
+            smsSender = smsSender,
+            whatsAppManager = com.example.whatsapp.WhatsAppControlManager.instance
+        )
+        dynamicActionPlanner = com.example.function.DynamicActionPlanner(dynamicFunctionRegistry)
+
         localVoiceCommandRouter = com.example.voice.LocalVoiceCommandRouter(
             context = this,
             directCallManager = directCallManager,
@@ -133,6 +155,11 @@ class AutoResponderApp : Application() {
             deviceToggleManager = deviceToggleManager,
             emergencySosManager = emergencySosManager,
             maxCameraManager = maxCameraManager
+        )
+        hybridAiPipeline = com.example.ai.HybridAiProcessingPipeline(
+            context = this,
+            localRouter = localVoiceCommandRouter,
+            geminiService = geminiService
         )
     }
 

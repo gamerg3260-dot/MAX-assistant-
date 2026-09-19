@@ -24,6 +24,12 @@ sealed class AiResult {
     data class Error(val message: String, val isQuotaOrAuth: Boolean = false) : AiResult()
 }
 
+sealed class GeminiFunctionCallResult {
+    data class Calls(val functionCalls: JSONArray, val textExplanation: String? = null) : GeminiFunctionCallResult()
+    data class TextOnly(val text: String) : GeminiFunctionCallResult()
+    data class Error(val message: String) : GeminiFunctionCallResult()
+}
+
 sealed class GeminiKeyValidationResult {
     data class Success(
         val message: String,
@@ -508,6 +514,94 @@ class GeminiAutoResponderService(private val context: Context) {
             }
         } catch (e: Exception) {
             AiResult.Error("Anthropic execution error: ${e.localizedMessage ?: e.message}")
+        }
+    }
+
+    /**
+     * Executes a Gemini API request with Dynamic Tool / Function Declarations.
+     * Parses structured function calls if returned by Gemini.
+     */
+    suspend fun executeGeminiFunctionCalling(
+        prompt: String,
+        toolsJson: JSONArray,
+        modelName: String = "gemini-2.5-flash"
+    ): GeminiFunctionCallResult = withContext(Dispatchers.IO) {
+        val apiKey = SecureKeyManager.getApiKey(context)
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            return@withContext GeminiFunctionCallResult.Error("Gemini API key is not configured.")
+        }
+
+        val resolvedModel = if (modelName.isBlank()) "gemini-2.5-flash" else modelName
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:generateContent?key=$apiKey"
+
+        return@withContext try {
+            val jsonBody = JSONObject().apply {
+                val contentsArray = JSONArray().apply {
+                    val contentObj = JSONObject().apply {
+                        val partsArray = JSONArray().apply {
+                            put(JSONObject().apply { put("text", prompt) })
+                        }
+                        put("parts", partsArray)
+                    }
+                    put(contentObj)
+                }
+                put("contents", contentsArray)
+                put("tools", toolsJson)
+
+                val genConfig = JSONObject().apply {
+                    put("temperature", 0.2)
+                    put("maxOutputTokens", 256)
+                }
+                put("generationConfig", genConfig)
+            }
+
+            val request = Request.Builder()
+                .url(url)
+                .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            val (code, responseBody) = httpClient.newCall(request).execute().use { response ->
+                Pair(response.code, response.body?.string() ?: "")
+            }
+
+            if (code in 200..299) {
+                val rootObj = JSONObject(responseBody)
+                val candidates = rootObj.optJSONArray("candidates")
+                if (candidates != null && candidates.length() > 0) {
+                    val firstCandidate = candidates.getJSONObject(0)
+                    val content = firstCandidate.optJSONObject("content")
+                    val parts = content?.optJSONArray("parts")
+
+                    val extractedFunctionCalls = JSONArray()
+                    var explanationText: String? = null
+
+                    if (parts != null) {
+                        for (i in 0 until parts.length()) {
+                            val part = parts.getJSONObject(i)
+                            if (part.has("functionCall")) {
+                                extractedFunctionCalls.put(part.getJSONObject("functionCall"))
+                            } else if (part.has("text")) {
+                                explanationText = part.getString("text")
+                            }
+                        }
+                    }
+
+                    if (extractedFunctionCalls.length() > 0) {
+                        GeminiFunctionCallResult.Calls(extractedFunctionCalls, explanationText)
+                    } else if (!explanationText.isNullOrBlank()) {
+                        GeminiFunctionCallResult.TextOnly(explanationText)
+                    } else {
+                        GeminiFunctionCallResult.Error("No actionable response from Gemini.")
+                    }
+                } else {
+                    GeminiFunctionCallResult.Error("Empty candidates from Gemini.")
+                }
+            } else {
+                GeminiFunctionCallResult.Error("Gemini Error ($code): ${parseErrorMessage(responseBody)}")
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Function calling error: ${e.message}", e)
+            GeminiFunctionCallResult.Error(e.message ?: "Failed to execute function calling")
         }
     }
 
