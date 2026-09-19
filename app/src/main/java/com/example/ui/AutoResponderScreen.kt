@@ -462,15 +462,6 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
                     onOpenApiKeyDialog = { showApiKeyDialog = true }
                 )
 
-                // Theme Preset Chips (Categorized into 3 logical sections)
-                SiriThemeSelectorSection(
-                    currentPreset = settings.themePreset,
-                    currentMainSection = currentSection,
-                    theme = currentTheme,
-                    onSelectPreset = { viewModel.setThemePreset(it) },
-                    onCategorySelected = { currentSection = it }
-                )
-
                 // Missing Permission Banner if needed
                 if (missingPermissions.isNotEmpty()) {
                     SiriPermissionBanner(
