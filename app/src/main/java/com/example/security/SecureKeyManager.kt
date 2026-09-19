@@ -6,9 +6,10 @@ import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.example.BuildConfig
+import com.example.ai.ApiProvider
 
 /**
- * Secure storage manager for Gemini API keys and sensitive credentials.
+ * Secure storage manager for multi-provider API keys (Gemini, Groq, OpenAI, etc.) and sensitive credentials.
  * Implements persistent SharedPreferences with fallback to EncryptedSharedPreferences and BuildConfig.
  */
 object SecureKeyManager {
@@ -18,6 +19,7 @@ object SecureKeyManager {
     private const val KEY_GEMINI_LEGACY_KEY = "encrypted_gemini_api_key"
     private const val KEY_ELEVENLABS_API_KEY = "elevenlabs_api_key"
     private const val KEY_ELEVENLABS_LEGACY_KEY = "encrypted_elevenlabs_api_key"
+    private const val KEY_ACTIVE_PROVIDER = "active_ai_provider"
 
     private fun getStandardPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
@@ -43,77 +45,127 @@ object SecureKeyManager {
     }
 
     /**
-     * Retrieves the active Gemini API Key.
-     * Checks SharedPreferences first, then encrypted fallback, then BuildConfig.GEMINI_API_KEY.
+     * Gets the currently active AI provider. Defaults to GEMINI if none set.
      */
-    fun getApiKey(context: Context): String {
+    fun getActiveProvider(context: Context): ApiProvider {
         val stdPrefs = getStandardPrefs(context)
-        var storedKey = stdPrefs.getString(KEY_GEMINI_API_KEY, null)?.trim()
-        if (storedKey.isNullOrEmpty()) {
-            storedKey = stdPrefs.getString(KEY_GEMINI_LEGACY_KEY, null)?.trim()
-        }
+        val providerId = stdPrefs.getString(KEY_ACTIVE_PROVIDER, ApiProvider.GEMINI.id)
+        return ApiProvider.fromId(providerId)
+    }
 
-        if (storedKey.isNullOrEmpty()) {
-            storedKey = try {
-                getEncryptedPrefs(context)?.getString(KEY_GEMINI_API_KEY, null)?.trim()
-            } catch (e: Exception) {
-                null
+    /**
+     * Sets the currently active AI provider and commits to SharedPreferences.
+     */
+    fun setActiveProvider(context: Context, provider: ApiProvider) {
+        val stdPrefs = getStandardPrefs(context)
+        stdPrefs.edit()
+            .putString(KEY_ACTIVE_PROVIDER, provider.id)
+            .commit()
+        Log.i(TAG, "Active AI provider set to ${provider.displayName} (${provider.id})")
+    }
+
+    /**
+     * Retrieves the API key for a specific provider.
+     */
+    fun getProviderApiKey(context: Context, provider: ApiProvider): String {
+        val stdPrefs = getStandardPrefs(context)
+        val prefKey = "api_key_${provider.id}"
+        var key = stdPrefs.getString(prefKey, null)?.trim()
+
+        if (key.isNullOrEmpty() && provider == ApiProvider.GEMINI) {
+            key = stdPrefs.getString(KEY_GEMINI_API_KEY, null)?.trim()
+            if (key.isNullOrEmpty()) {
+                key = stdPrefs.getString(KEY_GEMINI_LEGACY_KEY, null)?.trim()
+            }
+            if (key.isNullOrEmpty()) {
+                val buildConfigKey = try {
+                    BuildConfig.GEMINI_API_KEY.trim()
+                } catch (e: Exception) {
+                    ""
+                }
+                if (buildConfigKey.isNotEmpty() && buildConfigKey != "MY_GEMINI_API_KEY") {
+                    key = buildConfigKey
+                }
             }
         }
 
-        if (!storedKey.isNullOrEmpty()) {
-            return storedKey
-        }
-
-        // Fallback to BuildConfig if provided at compile/environment time
-        val buildConfigKey = try {
-            BuildConfig.GEMINI_API_KEY.trim()
-        } catch (e: Exception) {
-            ""
-        }
-
-        return if (buildConfigKey.isNotEmpty() && buildConfigKey != "MY_GEMINI_API_KEY") {
-            buildConfigKey
-        } else {
-            ""
-        }
+        return key ?: ""
     }
 
     /**
-     * Stores an updated API key into SharedPreferences with immediate commit.
+     * Saves an API key for a specific provider into SharedPreferences.
      */
-    fun saveApiKey(context: Context, apiKey: String) {
+    fun saveProviderApiKey(context: Context, provider: ApiProvider, apiKey: String) {
         val trimmed = apiKey.trim()
         val stdPrefs = getStandardPrefs(context)
+        val prefKey = "api_key_${provider.id}"
+
         stdPrefs.edit()
-            .putString(KEY_GEMINI_API_KEY, trimmed)
-            .putString(KEY_GEMINI_LEGACY_KEY, trimmed)
+            .putString(prefKey, trimmed)
+            .putString(KEY_ACTIVE_PROVIDER, provider.id)
+            .apply {
+                if (provider == ApiProvider.GEMINI) {
+                    putString(KEY_GEMINI_API_KEY, trimmed)
+                    putString(KEY_GEMINI_LEGACY_KEY, trimmed)
+                }
+            }
             .commit()
 
         try {
-            getEncryptedPrefs(context)?.edit()?.putString(KEY_GEMINI_API_KEY, trimmed)?.apply()
+            getEncryptedPrefs(context)?.edit()?.putString(prefKey, trimmed)?.apply()
         } catch (e: Exception) {
             Log.w(TAG, "Could not mirror key to encrypted prefs: ${e.message}")
         }
-        Log.i(TAG, "Gemini API key successfully saved to SharedPreferences.")
+        Log.i(TAG, "API key for ${provider.displayName} successfully saved and activated.")
     }
 
     /**
-     * Clears the custom API key stored in SharedPreferences.
+     * Retrieves the active API Key based on current provider or legacy fallback.
+     */
+    fun getApiKey(context: Context): String {
+        val activeProvider = getActiveProvider(context)
+        val providerKey = getProviderApiKey(context, activeProvider)
+        if (providerKey.isNotEmpty()) {
+            return providerKey
+        }
+
+        // Fallback to standard Gemini key
+        return getProviderApiKey(context, ApiProvider.GEMINI)
+    }
+
+    /**
+     * Stores an updated API key into SharedPreferences with immediate auto-detection and activation.
+     */
+    fun saveApiKey(context: Context, apiKey: String) {
+        val trimmed = apiKey.trim()
+        val detectedProvider = ApiProvider.detectProvider(trimmed)
+        saveProviderApiKey(context, detectedProvider, trimmed)
+    }
+
+    /**
+     * Clears the custom API key stored for the active provider.
      */
     fun clearCustomApiKey(context: Context) {
+        val activeProvider = getActiveProvider(context)
         val stdPrefs = getStandardPrefs(context)
+        val prefKey = "api_key_${activeProvider.id}"
+
         stdPrefs.edit()
-            .remove(KEY_GEMINI_API_KEY)
-            .remove(KEY_GEMINI_LEGACY_KEY)
+            .remove(prefKey)
+            .apply {
+                if (activeProvider == ApiProvider.GEMINI) {
+                    remove(KEY_GEMINI_API_KEY)
+                    remove(KEY_GEMINI_LEGACY_KEY)
+                }
+            }
             .commit()
 
         try {
-            getEncryptedPrefs(context)?.edit()?.remove(KEY_GEMINI_API_KEY)?.apply()
+            getEncryptedPrefs(context)?.edit()?.remove(prefKey)?.apply()
         } catch (e: Exception) {
             // Ignore
         }
-        Log.i(TAG, "Gemini API key cleared from SharedPreferences.")
+        Log.i(TAG, "API key for ${activeProvider.displayName} cleared from SharedPreferences.")
     }
 
     /**

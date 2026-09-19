@@ -90,6 +90,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.BrightnessLow
 import androidx.compose.material.icons.filled.BrightnessMedium
+import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Key
@@ -137,6 +138,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -308,6 +310,12 @@ object SiriThemePresets {
         orbColors = listOf(Color(0xFFE2E8F0), Color(0xFF38BDF8), Color(0xFF93C5FD), Color(0xFFCBD5E1))
     )
 
+    val allPresets: List<SiriThemeColors> = listOf(
+        SiriSpectrum, CyberNeon, Ultraviolet,
+        AuroraEmerald, SolarGold, OceanicDeep,
+        MidnightStealth, CrimsonShadow, TitaniumFrost
+    )
+
     fun getThemesForCategory(sectionIndex: Int): List<SiriThemeColors> {
         return when (sectionIndex) {
             0 -> listOf(SiriSpectrum, CyberNeon, Ultraviolet)
@@ -455,7 +463,8 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
                     currentPreset = settings.themePreset,
                     currentMainSection = currentSection,
                     theme = currentTheme,
-                    onSelectPreset = { viewModel.setThemePreset(it) }
+                    onSelectPreset = { viewModel.setThemePreset(it) },
+                    onCategorySelected = { currentSection = it }
                 )
 
                 // Missing Permission Banner if needed
@@ -721,26 +730,65 @@ fun SiriThemeSelectorSection(
     currentPreset: String,
     currentMainSection: Int,
     theme: SiriThemeColors,
-    onSelectPreset: (String) -> Unit
+    onSelectPreset: (String) -> Unit,
+    onCategorySelected: ((Int) -> Unit)? = null
 ) {
     var selectedCategoryIndex by remember(currentMainSection) {
         mutableIntStateOf(currentMainSection.coerceIn(0, 2))
     }
 
+    // Keep selectedCategoryIndex synced if currentMainSection changes externally
+    androidx.compose.runtime.LaunchedEffect(currentMainSection) {
+        selectedCategoryIndex = currentMainSection.coerceIn(0, 2)
+    }
+
     val categories = remember {
         listOf(
-            ThemeCategory("Voice & Cyber", Icons.Default.RecordVoiceOver, SiriThemePresets.getThemesForCategory(0)),
-            ThemeCategory("Hardware & Solar", Icons.Default.Tune, SiriThemePresets.getThemesForCategory(1)),
-            ThemeCategory("Security & Stealth", Icons.Default.Security, SiriThemePresets.getThemesForCategory(2))
+            ThemeCategory("Voice AI", Icons.Default.RecordVoiceOver, SiriThemePresets.getThemesForCategory(0)),
+            ThemeCategory("Hardware System", Icons.Default.Tune, SiriThemePresets.getThemesForCategory(1)),
+            ThemeCategory("Security & SOS", Icons.Default.Security, SiriThemePresets.getThemesForCategory(2))
         )
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 4.dp)
+            .padding(horizontal = 14.dp, vertical = 2.dp)
     ) {
-        // Category Switcher Row (Categorized into Three Logical Sections)
+        // Label indicating theme palette
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.ColorLens,
+                    contentDescription = null,
+                    tint = theme.primaryAccent,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "THEME ACCENTS",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = theme.primaryAccent,
+                    letterSpacing = 0.8.sp
+                )
+            }
+            Text(
+                text = "Active: $currentPreset",
+                fontSize = 10.sp,
+                color = Color.White.copy(alpha = 0.6f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(3.dp))
+
+        // Category Switcher Row (Synchronized with Tab Navigation)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -761,7 +809,10 @@ fun SiriThemeSelectorSection(
                             color = if (isCatSelected) theme.primaryAccent else Color.White.copy(alpha = 0.12f),
                             shape = RoundedCornerShape(8.dp)
                         )
-                        .clickable { selectedCategoryIndex = index }
+                        .clickable {
+                            selectedCategoryIndex = index
+                            onCategorySelected?.invoke(index)
+                        }
                         .padding(vertical = 5.dp, horizontal = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -788,7 +839,7 @@ fun SiriThemeSelectorSection(
             }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(5.dp))
 
         // Themes within the selected category
         val currentThemes = categories[selectedCategoryIndex].themes
@@ -974,9 +1025,9 @@ fun ThreeSectionNavigationBar(
     onSectionSelected: (Int) -> Unit
 ) {
     val sections = listOf(
-        Triple("Voice & AI", "Calls & WhatsApp", Icons.Default.RecordVoiceOver),
-        Triple("Hardware & Tools", "System & Camera", Icons.Default.Tune),
-        Triple("Security & Settings", "SOS & Config", Icons.Default.Security)
+        Triple("Voice AI", "Calls & Announcer", Icons.Default.RecordVoiceOver),
+        Triple("Hardware System", "Toggles & Media", Icons.Default.Tune),
+        Triple("Security & SOS", "Settings & Safety", Icons.Default.Security)
     )
 
     Row(
@@ -987,6 +1038,11 @@ fun ThreeSectionNavigationBar(
     ) {
         sections.forEachIndexed { index, (title, subtitle, icon) ->
             val isSelected = selectedSection == index
+            val testTag = when (index) {
+                0 -> "nav_tab_voice_ai"
+                1 -> "nav_tab_hardware_system"
+                else -> "nav_tab_security_sos"
+            }
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -1001,6 +1057,7 @@ fun ThreeSectionNavigationBar(
                         shape = RoundedCornerShape(14.dp)
                     )
                     .clickable { onSectionSelected(index) }
+                    .testTag(testTag)
                     .padding(vertical = 8.dp, horizontal = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -1097,7 +1154,7 @@ fun VoiceCallAnnouncerTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 220.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -1346,7 +1403,7 @@ fun BlocklistSpamTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 220.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -1700,7 +1757,7 @@ fun HardwareSystemControlTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 220.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -1734,9 +1791,15 @@ fun HardwareSystemControlTab(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.White.copy(alpha = 0.05f))
+                            .clickable { viewModel.toggleWifi(!isWifiEnabled) }
                             .padding(12.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
+                        ) {
                             Icon(
                                 imageVector = if (isWifiEnabled) Icons.Default.Wifi else Icons.Default.WifiOff,
                                 contentDescription = null,
@@ -1756,7 +1819,9 @@ fun HardwareSystemControlTab(
                                 containerColor = if (isWifiEnabled) theme.primaryAccent else Color.DarkGray
                             ),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.testTag("toggle_wifi_btn")
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("toggle_wifi_btn")
                         ) {
                             Text(
                                 text = if (isWifiEnabled) "ON" else "OFF",
@@ -1777,9 +1842,15 @@ fun HardwareSystemControlTab(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.White.copy(alpha = 0.05f))
+                            .clickable { viewModel.toggleFlashlight(!isFlashlightOn) }
                             .padding(12.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.FlashOn,
                                 contentDescription = null,
@@ -1799,7 +1870,9 @@ fun HardwareSystemControlTab(
                                 containerColor = if (isFlashlightOn) Color(0xFFFFD600) else Color.DarkGray
                             ),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.testTag("toggle_flashlight_btn")
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("toggle_flashlight_btn")
                         ) {
                             Text(
                                 text = if (isFlashlightOn) "ON" else "OFF",
@@ -2218,7 +2291,7 @@ fun AppMediaControlTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 220.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -2289,7 +2362,7 @@ fun WorkbenchAndEventsTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 220.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -2589,38 +2662,49 @@ fun SiriToggleCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .clip(RoundedCornerShape(16.dp))
+                .clickable { onCheckedChange(!checked) }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Box(
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(if (checked) theme.primaryAccent.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f)),
-                contentAlignment = Alignment.Center
+                    .weight(1f)
+                    .padding(end = 12.dp)
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = if (checked) theme.primaryAccent else Color.Gray,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(if (checked) theme.primaryAccent.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = if (checked) theme.primaryAccent else Color.Gray,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
 
-            Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.6f)
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = subtitle,
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.6f)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -2633,7 +2717,8 @@ fun SiriToggleCard(
                     checkedTrackColor = theme.primaryAccent,
                     uncheckedThumbColor = Color.Gray,
                     uncheckedTrackColor = Color.DarkGray
-                )
+                ),
+                modifier = Modifier.minimumInteractiveComponentSize()
             )
         }
     }
@@ -3364,17 +3449,45 @@ fun ApiKeyConfigDialog(
     theme: SiriThemeColors,
     onDismiss: () -> Unit
 ) {
-    val geminiKey by viewModel.apiKeyText.collectAsState()
-    val isValidatingGeminiKey by viewModel.isValidatingGeminiKey.collectAsState()
-    val geminiValidationStatus by viewModel.geminiValidationStatus.collectAsState()
+    val currentApiKey by viewModel.apiKeyText.collectAsState()
+    val isValidatingKey by viewModel.isValidatingGeminiKey.collectAsState()
+    val validationStatus by viewModel.geminiValidationStatus.collectAsState()
+    val settings by viewModel.settings.collectAsState()
 
-    val elevenLabsKey by viewModel.elevenLabsApiKeyText.collectAsState()
-    val isValidatingKey by viewModel.isValidatingElevenLabsKey.collectAsState()
-    val validationStatus by viewModel.elevenLabsValidationStatus.collectAsState()
+    var activeTab by remember { mutableIntStateOf(1) } // 0 = Swara Voice, 1 = AI Engine & Models
+    var inputKey by remember(currentApiKey) { mutableStateOf(currentApiKey) }
 
-    var activeTab by remember { mutableIntStateOf(0) } // 0 = ElevenLabs, 1 = Gemini
-    var tempGeminiKey by remember(geminiKey) { mutableStateOf(geminiKey) }
-    var tempElevenLabsKey by remember(elevenLabsKey) { mutableStateOf(elevenLabsKey) }
+    // Auto-detect provider in real time from inputKey or fallback to active provider in settings
+    val detectedProvider = remember(inputKey) {
+        if (inputKey.isNotBlank()) {
+            com.example.ai.ApiProvider.detectProvider(inputKey)
+        } else {
+            com.example.ai.ApiProvider.fromId(settings.activeAiProvider)
+        }
+    }
+
+    var selectedProvider by remember(detectedProvider) { mutableStateOf(detectedProvider) }
+    var selectedModel by remember(settings.modelName, selectedProvider) {
+        val defaultForProvider = selectedProvider.defaultModel
+        if (selectedProvider.availableModels.contains(settings.modelName)) {
+            mutableStateOf(settings.modelName)
+        } else {
+            mutableStateOf(defaultForProvider)
+        }
+    }
+
+    // Auto-validate trigger when a key is pasted or entered with sufficient length
+    var lastValidatedKey by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(inputKey) {
+        val trimmed = inputKey.trim()
+        if (trimmed.length >= 20 && trimmed != lastValidatedKey && !isValidatingKey) {
+            kotlinx.coroutines.delay(800) // Debounce typing before auto-validation
+            if (trimmed == inputKey.trim() && trimmed != lastValidatedKey) {
+                lastValidatedKey = trimmed
+                viewModel.validateAndSaveApiKey(trimmed)
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -3401,7 +3514,7 @@ fun ApiKeyConfigDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
             ) {
-                // Tab selector for ElevenLabs / Gemini
+                // Tab selector for AI Engine vs Swara Voice
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3409,12 +3522,12 @@ fun ApiKeyConfigDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilterChip(
-                        selected = activeTab == 0,
-                        onClick = { activeTab = 0 },
-                        label = { Text("Swara Voice TTS", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        selected = activeTab == 1,
+                        onClick = { activeTab = 1 },
+                        label = { Text("AI Providers & Keys", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                         leadingIcon = {
                             Icon(
-                                imageVector = Icons.Default.RecordVoiceOver,
+                                imageVector = Icons.Default.AutoAwesome,
                                 contentDescription = null,
                                 modifier = Modifier.size(14.dp)
                             )
@@ -3429,12 +3542,12 @@ fun ApiKeyConfigDialog(
                     )
 
                     FilterChip(
-                        selected = activeTab == 1,
-                        onClick = { activeTab = 1 },
-                        label = { Text("Gemini AI API", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        selected = activeTab == 0,
+                        onClick = { activeTab = 0 },
+                        label = { Text("Swara Voice TTS", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                         leadingIcon = {
                             Icon(
-                                imageVector = Icons.Default.AutoAwesome,
+                                imageVector = Icons.Default.RecordVoiceOver,
                                 contentDescription = null,
                                 modifier = Modifier.size(14.dp)
                             )
@@ -3495,9 +3608,9 @@ fun ApiKeyConfigDialog(
                         Text("Test Swara Native Voice", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 } else {
-                    // Gemini Section
+                    // 1. AUTO-DETECT API PROVIDER & KEY ENTRY
                     Text(
-                        "Enter your Gemini API key for AI response generation and reasoning. Key is validated and saved in SharedPreferences.",
+                        text = "Enter any AI API key. The provider (Gemini, Groq, OpenAI, Claude, DeepSeek, etc.) is automatically identified, verified, and saved to SharedPreferences.",
                         fontSize = 12.sp,
                         color = Color.LightGray
                     )
@@ -3505,12 +3618,12 @@ fun ApiKeyConfigDialog(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     OutlinedTextField(
-                        value = tempGeminiKey,
-                        onValueChange = { tempGeminiKey = it },
-                        placeholder = { Text("AIzaSy...", color = Color.Gray) },
+                        value = inputKey,
+                        onValueChange = { inputKey = it },
+                        placeholder = { Text(selectedProvider.placeholder, color = Color.Gray) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = theme.secondaryAccent,
+                            focusedBorderColor = theme.primaryAccent,
                             unfocusedBorderColor = Color.Gray,
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White
@@ -3520,7 +3633,133 @@ fun ApiKeyConfigDialog(
                             .testTag("gemini_api_key_input")
                     )
 
-                    if (isValidatingGeminiKey) {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Live Auto-Detected Provider Badge
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color.White.copy(alpha = 0.07f),
+                        border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "Detected Provider",
+                                    tint = theme.primaryAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = selectedProvider.displayName,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = theme.primaryAccent.copy(alpha = 0.2f)
+                                        ) {
+                                            Text(
+                                                text = if (inputKey.isNotBlank() && detectedProvider != com.example.ai.ApiProvider.UNKNOWN) "AUTO-DETECTED" else "ACTIVE PROVIDER",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = theme.primaryAccent,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = com.example.ai.ApiProvider.getFormatHint(selectedProvider),
+                                        fontSize = 10.sp,
+                                        color = Color.LightGray
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Provider Quick Switch Chips
+                    Text(
+                        text = "Or Select Provider Manually:",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        com.example.ai.ApiProvider.entries.filter { it != com.example.ai.ApiProvider.UNKNOWN }.forEach { provider ->
+                            val isSelected = selectedProvider == provider
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    selectedProvider = provider
+                                    viewModel.setAiProvider(provider.id)
+                                    selectedModel = provider.defaultModel
+                                },
+                                label = { Text(provider.displayName, fontSize = 10.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = theme.primaryAccent,
+                                    selectedLabelColor = Color.Black,
+                                    containerColor = Color.White.copy(alpha = 0.06f),
+                                    labelColor = Color.White
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 4. DYNAMIC VERSION MATCHING (Model Selector adapted to detected provider)
+                    Text(
+                        text = "Model Version (${selectedProvider.displayName}):",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.9f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        selectedProvider.availableModels.forEach { modelName ->
+                            val isModelSelected = selectedModel == modelName
+                            FilterChip(
+                                selected = isModelSelected,
+                                onClick = {
+                                    selectedModel = modelName
+                                    viewModel.setModelName(modelName)
+                                },
+                                label = { Text(modelName, fontSize = 10.sp, fontWeight = if (isModelSelected) FontWeight.Bold else FontWeight.Normal) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = theme.secondaryAccent,
+                                    selectedLabelColor = Color.Black,
+                                    containerColor = Color.White.copy(alpha = 0.08f),
+                                    labelColor = Color.White
+                                )
+                            )
+                        }
+                    }
+
+                    // 2. VALIDATE AND VERIFY PROGRESS & STATUS
+                    if (isValidatingKey) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -3528,72 +3767,89 @@ fun ApiKeyConfigDialog(
                         ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
-                                color = theme.secondaryAccent,
+                                color = theme.primaryAccent,
                                 strokeWidth = 2.dp
                             )
                             Text(
-                                "Validating Gemini key with Google servers...",
+                                "Validating key with ${selectedProvider.displayName}...",
                                 fontSize = 11.sp,
-                                color = theme.secondaryAccent
+                                color = theme.primaryAccent
                             )
                         }
                     }
 
-                    geminiValidationStatus?.let { status ->
+                    validationStatus?.let { status ->
                         Spacer(modifier = Modifier.height(10.dp))
-                        val isSuccess = status.contains("verified", ignoreCase = true) || status.contains("valid", ignoreCase = true) || status.contains("saved", ignoreCase = true)
+                        val isSuccess = status.contains("verified", ignoreCase = true) ||
+                                status.contains("valid", ignoreCase = true) ||
+                                status.contains("saved", ignoreCase = true) ||
+                                status.contains("activated", ignoreCase = true)
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = if (isSuccess) Color(0xFF064E3B) else Color(0xFF7F1D1D),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = status,
-                                fontSize = 11.sp,
-                                color = if (isSuccess) Color(0xFF6EE7B7) else Color(0xFFFCA5A5),
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(8.dp)
-                            )
+                            ) {
+                                Icon(
+                                    imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = if (isSuccess) Color(0xFF6EE7B7) else Color(0xFFFCA5A5),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = status,
+                                    fontSize = 11.sp,
+                                    color = if (isSuccess) Color(0xFF6EE7B7) else Color(0xFFFCA5A5)
+                                )
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
+                    // 3. SAVE AND ACTIVATE ACTION BUTTONS
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Button(
                             onClick = {
-                                viewModel.validateAndSaveGeminiApiKey(tempGeminiKey)
+                                viewModel.validateAndSaveApiKey(inputKey)
                             },
-                            enabled = !isValidatingGeminiKey && tempGeminiKey.isNotBlank(),
-                            colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent),
+                            enabled = !isValidatingKey && inputKey.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
-                                .weight(1f)
+                                .weight(1.3f)
                                 .testTag("validate_gemini_key_btn")
                         ) {
-                            Text("Validate & Save", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Validate & Activate", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
 
                         OutlinedButton(
                             onClick = {
-                                viewModel.saveApiKey(tempGeminiKey)
+                                viewModel.saveApiKey(inputKey)
                             },
-                            enabled = tempGeminiKey.isNotBlank(),
-                            shape = RoundedCornerShape(10.dp)
+                            enabled = inputKey.isNotBlank(),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(0.9f)
                         ) {
-                            Text("Save", color = Color.White, fontSize = 12.sp)
+                            Text("Save", color = Color.White, fontSize = 11.sp)
                         }
 
                         OutlinedButton(
                             onClick = {
                                 viewModel.clearApiKey()
-                                tempGeminiKey = ""
+                                inputKey = ""
                             },
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(0.8f)
                         ) {
-                            Text("Clear", color = Color.LightGray, fontSize = 12.sp)
+                            Text("Clear", color = Color.LightGray, fontSize = 11.sp)
                         }
                     }
                 }
@@ -3923,7 +4179,7 @@ fun WhatsAppControlTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 220.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Notification Listener Permission Header Card
@@ -4263,7 +4519,7 @@ fun AutoScrollTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 220.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. Accessibility Service Permission Card
@@ -4642,7 +4898,7 @@ fun EmergencySosTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 220.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. Live Location Tracking Card
@@ -5083,7 +5339,7 @@ fun CameraAndSelfieTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 220.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. Camera Viewfinder & Preview Card

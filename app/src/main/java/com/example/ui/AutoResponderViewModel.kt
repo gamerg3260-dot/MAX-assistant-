@@ -397,26 +397,48 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
         settingsRepo.updateSettings(settings.value.copy(antiSpamCooldownMinutes = minutes))
     }
 
-    fun saveApiKey(newKey: String) {
-        SecureKeyManager.saveApiKey(getApplication(), newKey)
+    fun setAiProvider(providerId: String) {
+        val provider = com.example.ai.ApiProvider.fromId(providerId)
+        SecureKeyManager.setActiveProvider(getApplication(), provider)
+        settingsRepo.setAiProvider(providerId, provider.defaultModel)
         _apiKeyText.value = SecureKeyManager.getApiKey(getApplication())
-        _geminiValidationStatus.value = "Gemini key saved to SharedPreferences."
+    }
+
+    fun setModelName(modelName: String) {
+        settingsRepo.setModelName(modelName)
+    }
+
+    fun detectApiProvider(candidateKey: String): com.example.ai.ApiProvider {
+        return com.example.ai.ApiProvider.detectProvider(candidateKey)
+    }
+
+    fun saveApiKey(newKey: String) {
+        val provider = com.example.ai.ApiProvider.detectProvider(newKey)
+        SecureKeyManager.saveProviderApiKey(getApplication(), provider, newKey)
+        SecureKeyManager.setActiveProvider(getApplication(), provider)
+        settingsRepo.setAiProvider(provider.id, provider.defaultModel)
+        _apiKeyText.value = SecureKeyManager.getApiKey(getApplication())
+        _geminiValidationStatus.value = "${provider.displayName} key saved to SharedPreferences."
     }
 
     /**
-     * Validates candidate Gemini API key with Google servers and saves to SharedPreferences upon success.
+     * Auto-detects the provider and triggers a validation check automatically upon entry.
+     * On successful validation, securely saves the key in SharedPreferences, activates the service,
+     * and dynamically updates the version matching.
      */
-    fun validateAndSaveGeminiApiKey(candidateKey: String, onResult: ((Boolean, String) -> Unit)? = null) {
+    fun validateAndSaveApiKey(candidateKey: String, onResult: ((Boolean, String) -> Unit)? = null) {
         val trimmed = candidateKey.trim()
         if (trimmed.isBlank()) {
-            _geminiValidationStatus.value = "Please enter a valid Gemini API key."
-            onResult?.invoke(false, "Please enter a valid Gemini API key.")
+            _geminiValidationStatus.value = "Please enter an API key."
+            onResult?.invoke(false, "Please enter an API key.")
             return
         }
 
+        val detectedProvider = com.example.ai.ApiProvider.detectProvider(trimmed)
+
         viewModelScope.launch {
             _isValidatingGeminiKey.value = true
-            _geminiValidationStatus.value = "Validating Gemini API key with Google servers..."
+            _geminiValidationStatus.value = "Auto-detected ${detectedProvider.displayName}. Validating API key..."
 
             val result = geminiService.validateAndSaveApiKey(trimmed)
             _isValidatingGeminiKey.value = false
@@ -433,6 +455,13 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 }
             }
         }
+    }
+
+    /**
+     * Backward-compatible alias for validateAndSaveApiKey
+     */
+    fun validateAndSaveGeminiApiKey(candidateKey: String, onResult: ((Boolean, String) -> Unit)? = null) {
+        validateAndSaveApiKey(candidateKey, onResult)
     }
 
     fun validateAndSaveElevenLabsApiKey(candidateKey: String, onResult: ((Boolean, String) -> Unit)? = null) {

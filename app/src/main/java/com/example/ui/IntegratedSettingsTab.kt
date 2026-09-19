@@ -24,13 +24,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeMute
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Vibration
@@ -46,6 +49,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -94,7 +98,8 @@ fun IntegratedSettingsTab(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp)
+            .padding(top = 8.dp, bottom = 240.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // 1. QUICK CONTROLS DASHBOARD
@@ -109,11 +114,15 @@ fun IntegratedSettingsTab(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Master Assistant Switch
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { viewModel.toggleMaxAssistant(!settings.isMaxAssistantEnabled) }
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -123,7 +132,7 @@ fun IntegratedSettingsTab(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(42.dp)
                                 .clip(CircleShape)
                                 .background(
                                     if (isServiceRunning) theme.primaryAccent.copy(alpha = 0.2f)
@@ -139,13 +148,14 @@ fun IntegratedSettingsTab(
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text(
                                 text = "MAX Assistant Service",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = if (isServiceRunning) "Active foreground background engine" else "Standby - Tap to activate",
                                 fontSize = 12.sp,
@@ -153,6 +163,8 @@ fun IntegratedSettingsTab(
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Switch(
                         checked = settings.isMaxAssistantEnabled,
@@ -163,7 +175,9 @@ fun IntegratedSettingsTab(
                             uncheckedThumbColor = Color.Gray,
                             uncheckedTrackColor = Color.DarkGray
                         ),
-                        modifier = Modifier.testTag("settings_master_switch")
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("settings_master_switch")
                     )
                 }
 
@@ -176,7 +190,11 @@ fun IntegratedSettingsTab(
 
                 // System Overlay Floating Bubble Switch
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { viewModel.toggleSystemOverlay(context) }
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -186,7 +204,7 @@ fun IntegratedSettingsTab(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(42.dp)
                                 .clip(CircleShape)
                                 .background(
                                     if (isOverlayActive) theme.secondaryAccent.copy(alpha = 0.2f)
@@ -202,13 +220,14 @@ fun IntegratedSettingsTab(
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text(
                                 text = "Floating System Bubble",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = if (isOverlayActive) "Screen overlay bubble is active" else "Overlay bubble is hidden",
                                 fontSize = 11.sp,
@@ -216,6 +235,8 @@ fun IntegratedSettingsTab(
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Switch(
                         checked = isOverlayActive,
@@ -226,7 +247,9 @@ fun IntegratedSettingsTab(
                             uncheckedThumbColor = Color.Gray,
                             uncheckedTrackColor = Color.DarkGray
                         ),
-                        modifier = Modifier.testTag("settings_overlay_switch")
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("settings_overlay_switch")
                     )
                 }
 
@@ -387,9 +410,91 @@ fun IntegratedSettingsTab(
             }
         }
 
-        // 2. GEMINI AI INTELLIGENCE & API CONFIGURATION
+        // 2. THEME & VISUAL STYLING PRESET
         SiriSectionHeader(
-            title = "Gemini AI & Intelligence Configuration",
+            title = "Theme & Visual Appearance",
+            icon = Icons.Default.ColorLens,
+            theme = theme
+        )
+
+        SiriGlassCard(theme = theme) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Select Application Accent Theme",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SiriThemePresets.allPresets.forEach { preset ->
+                        val isSelected = preset.name == settings.themePreset
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (isSelected) theme.primaryAccent.copy(alpha = 0.25f)
+                                    else Color.White.copy(alpha = 0.07f)
+                                )
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 0.5.dp,
+                                    color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.18f),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { viewModel.setThemePreset(preset.name) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clip(CircleShape)
+                                        .background(preset.primaryAccent)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clip(CircleShape)
+                                        .background(preset.secondaryAccent)
+                                )
+                                Text(
+                                    text = preset.name,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.8f)
+                                )
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Active Theme",
+                                        tint = theme.primaryAccent,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. AI PROVIDER & INTELLIGENCE CONFIGURATION
+        SiriSectionHeader(
+            title = "AI Engine & Intelligence Configuration",
             icon = Icons.Default.AutoAwesome,
             theme = theme
         )
@@ -402,12 +507,16 @@ fun IntegratedSettingsTab(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 val hasApiKey = apiKey.isNotBlank()
+                val currentProvider = com.example.ai.ApiProvider.fromId(settings.activeAiProvider)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Key,
                             contentDescription = "API Key",
@@ -417,13 +526,13 @@ fun IntegratedSettingsTab(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Gemini Flash AI Model",
-                                fontSize = 14.sp,
+                                text = "${currentProvider.displayName} • ${settings.modelName}",
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                             Text(
-                                text = if (hasApiKey) "Active & Ready for Voice AI" else "Using Fallback/Server Mode",
+                                text = if (hasApiKey) "Active & Validated • ${currentProvider.providerFamily}" else "No key configured • Fallback Mode",
                                 fontSize = 11.sp,
                                 color = if (hasApiKey) Color(0xFF00E676) else Color(0xFFFFB300)
                             )
@@ -437,10 +546,12 @@ fun IntegratedSettingsTab(
                         ),
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.testTag("settings_config_api_key_btn")
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("settings_config_api_key_btn")
                     ) {
                         Text(
-                            text = if (hasApiKey) "Edit Key" else "Set Key",
+                            text = if (hasApiKey) "Manage Keys" else "Set Key",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (hasApiKey) Color.White else Color.Black
@@ -554,23 +665,30 @@ fun IntegratedSettingsTab(
             ) {
                 // Call Announcer Master Toggle
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { viewModel.toggleCallAnnouncer(!settings.isCallAnnouncerEnabled) }
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(
                             text = "Automated Call Announcer",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Reads caller contact name or spells unknown digits aloud",
                             fontSize = 11.sp,
                             color = Color.White.copy(alpha = 0.6f)
                         )
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Switch(
                         checked = settings.isCallAnnouncerEnabled,
@@ -579,7 +697,9 @@ fun IntegratedSettingsTab(
                             checkedThumbColor = Color.Black,
                             checkedTrackColor = theme.primaryAccent
                         ),
-                        modifier = Modifier.testTag("settings_call_announcer_switch")
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("settings_call_announcer_switch")
                     )
                 }
 
@@ -798,17 +918,22 @@ fun IntegratedSettingsTab(
 
                 // Auto Speakerphone on Accept
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { viewModel.setAutoSpeakerphoneOnAccept(!settings.autoSpeakerphoneOnAccept) }
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(
                             text = "Auto-Speakerphone on Accept",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Enables loudspeaker automatically when call is answered via voice",
                             fontSize = 11.sp,
@@ -816,13 +941,16 @@ fun IntegratedSettingsTab(
                         )
                     }
 
+                    Spacer(modifier = Modifier.width(8.dp))
+
                     Switch(
                         checked = settings.autoSpeakerphoneOnAccept,
                         onCheckedChange = { isChecked -> viewModel.setAutoSpeakerphoneOnAccept(isChecked) },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.Black,
                             checkedTrackColor = theme.primaryAccent
-                        )
+                        ),
+                        modifier = Modifier.minimumInteractiveComponentSize()
                     )
                 }
 
@@ -835,17 +963,22 @@ fun IntegratedSettingsTab(
 
                 // Proximity Sensor Silence on Flip
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { viewModel.toggleProximitySensorSilence(!settings.isProximitySensorSilence) }
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(
                             text = "Flip / Proximity Silence",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Silences incoming call ringer when phone is placed face down",
                             fontSize = 11.sp,
@@ -853,13 +986,16 @@ fun IntegratedSettingsTab(
                         )
                     }
 
+                    Spacer(modifier = Modifier.width(8.dp))
+
                     Switch(
                         checked = settings.isProximitySensorSilence,
                         onCheckedChange = { isChecked -> viewModel.toggleProximitySensorSilence(isChecked) },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.Black,
                             checkedTrackColor = theme.primaryAccent
-                        )
+                        ),
+                        modifier = Modifier.minimumInteractiveComponentSize()
                     )
                 }
 
@@ -872,17 +1008,22 @@ fun IntegratedSettingsTab(
 
                 // Bluetooth Headset Voice Control
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { viewModel.toggleBluetoothVoiceControl(!settings.isBluetoothVoiceControl) }
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(
                             text = "Bluetooth Headset Voice Control",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Route voice recognition and TTS through connected Bluetooth audio",
                             fontSize = 11.sp,
@@ -890,13 +1031,16 @@ fun IntegratedSettingsTab(
                         )
                     }
 
+                    Spacer(modifier = Modifier.width(8.dp))
+
                     Switch(
                         checked = settings.isBluetoothVoiceControl,
                         onCheckedChange = { isChecked -> viewModel.toggleBluetoothVoiceControl(isChecked) },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.Black,
                             checkedTrackColor = theme.primaryAccent
-                        )
+                        ),
+                        modifier = Modifier.minimumInteractiveComponentSize()
                     )
                 }
             }

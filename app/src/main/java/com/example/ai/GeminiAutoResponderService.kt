@@ -3,6 +3,7 @@ package com.example.ai
 import android.content.Context
 import android.util.Log
 import com.example.data.repository.AppSettings
+import com.example.data.repository.AppSettingsRepository
 import com.example.security.SecureKeyManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -24,7 +25,11 @@ sealed class AiResult {
 }
 
 sealed class GeminiKeyValidationResult {
-    data class Success(val message: String) : GeminiKeyValidationResult()
+    data class Success(
+        val message: String,
+        val provider: ApiProvider = ApiProvider.GEMINI,
+        val suggestedModel: String = "gemini-3.5-flash"
+    ) : GeminiKeyValidationResult()
     data class Error(val message: String) : GeminiKeyValidationResult()
 }
 
@@ -83,7 +88,7 @@ class GeminiAutoResponderService(private val context: Context) {
             appendLine("6. Output ONLY the reply text directly. Do not include quotes, prefixes, or explanations.")
         }
 
-        executeGeminiRequest(prompt, settings.modelName)
+        executeAiRequest(prompt, settings)
     }
 
     /**
@@ -120,7 +125,7 @@ class GeminiAutoResponderService(private val context: Context) {
             appendLine("3. Output ONLY the reply text directly. No quotes or prefixes.")
         }
 
-        executeGeminiRequest(prompt, settings.modelName)
+        executeAiRequest(prompt, settings)
     }
 
     /**
@@ -148,7 +153,7 @@ class GeminiAutoResponderService(private val context: Context) {
             appendLine("6. Output ONLY the reply text directly. Do not include quotes, prefixes, or explanations.")
         }
 
-        executeGeminiRequest(prompt, settings.modelName)
+        executeAiRequest(prompt, settings)
     }
 
     /**
@@ -189,7 +194,7 @@ class GeminiAutoResponderService(private val context: Context) {
             appendLine("6. Output ONLY the response text directly.")
         }
 
-        val result = executeGeminiRequest(prompt, settings.modelName)
+        val result = executeAiRequest(prompt, settings)
         if (result is AiResult.Success) {
             ConversationContextManager.getInstance().addTurn("user", userQuery)
             ConversationContextManager.getInstance().addTurn("assistant", result.text)
@@ -198,7 +203,7 @@ class GeminiAutoResponderService(private val context: Context) {
     }
 
     /**
-     * Streams voice response chunks from Gemini API asynchronously as text tokens are generated.
+     * Streams voice response chunks from active AI provider asynchronously as text tokens are generated.
      * Ensures immediate playback as soon as the first words/phrases are received.
      */
     fun streamMaxVoiceResponse(
@@ -222,9 +227,10 @@ class GeminiAutoResponderService(private val context: Context) {
             return@flow
         }
 
+        val activeProvider = SecureKeyManager.getActiveProvider(context)
         val apiKey = SecureKeyManager.getApiKey(context)
         if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
-            emit("Gemini API key is not configured. Please set your key in Settings.")
+            emit("${activeProvider.displayName} API key is not configured. Please set your key in Settings.")
             return@flow
         }
 
@@ -245,80 +251,265 @@ class GeminiAutoResponderService(private val context: Context) {
             appendLine("6. Output ONLY the response text directly.")
         }
 
-        val modelName = settings.modelName.trim()
-        val initialModel = when (modelName) {
-            "", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest" -> "gemini-3.6-flash"
-            else -> modelName
-        }
-
-        val modelsToTry = listOf(initialModel, "gemini-3.6-flash", "gemini-1.5-flash", "gemini-2.5-flash").distinct()
-
-        for (resolvedModel in modelsToTry) {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:streamGenerateContent?alt=sse&key=$apiKey"
-            val jsonBody = JSONObject().apply {
-                val contentsArray = JSONArray().apply {
-                    val contentObj = JSONObject().apply {
-                        val partsArray = JSONArray().apply {
-                            val partObj = JSONObject().apply {
-                                put("text", prompt)
-                            }
-                            put(partObj)
-                        }
-                        put("parts", partsArray)
-                    }
-                    put(contentObj)
-                }
-                put("contents", contentsArray)
-
-                val genConfig = JSONObject().apply {
-                    put("temperature", 0.3)
-                    put("maxOutputTokens", 120)
-                    put("topP", 0.8)
-                    put("topK", 20)
-                }
-                put("generationConfig", genConfig)
+        if (activeProvider == ApiProvider.GEMINI) {
+            val modelName = settings.modelName.trim()
+            val initialModel = when (modelName) {
+                "", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest" -> "gemini-3.5-flash"
+                else -> modelName
             }
 
-            val request = Request.Builder()
-                .url(url)
-                .post(jsonBody.toString().toRequestBody(jsonMediaType))
-                .build()
+            val modelsToTry = listOf(initialModel, "gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash").distinct()
 
-            var streamSuccess = false
-            try {
-                httpClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val source = response.body?.source()
-                        if (source != null) {
-                            while (!source.exhausted()) {
-                                val line = source.readUtf8Line() ?: break
-                                if (line.startsWith("data: ")) {
-                                    val jsonStr = line.removePrefix("data: ").trim()
-                                    if (jsonStr == "[DONE]") break
-                                    val chunkText = parseCandidateText(jsonStr)
-                                    if (!chunkText.isNullOrBlank()) {
-                                        streamSuccess = true
-                                        emit(chunkText)
+            for (resolvedModel in modelsToTry) {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModel:streamGenerateContent?alt=sse&key=$apiKey"
+                val jsonBody = JSONObject().apply {
+                    val contentsArray = JSONArray().apply {
+                        val contentObj = JSONObject().apply {
+                            val partsArray = JSONArray().apply {
+                                val partObj = JSONObject().apply {
+                                    put("text", prompt)
+                                }
+                                put(partObj)
+                            }
+                            put("parts", partsArray)
+                        }
+                        put(contentObj)
+                    }
+                    put("contents", contentsArray)
+
+                    val genConfig = JSONObject().apply {
+                        put("temperature", 0.3)
+                        put("maxOutputTokens", 120)
+                        put("topP", 0.8)
+                        put("topK", 20)
+                    }
+                    put("generationConfig", genConfig)
+                }
+
+                val request = Request.Builder()
+                    .url(url)
+                    .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                    .build()
+
+                var streamSuccess = false
+                try {
+                    httpClient.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val source = response.body?.source()
+                            if (source != null) {
+                                while (!source.exhausted()) {
+                                    val line = source.readUtf8Line() ?: break
+                                    if (line.startsWith("data: ")) {
+                                        val jsonStr = line.removePrefix("data: ").trim()
+                                        if (jsonStr == "[DONE]") break
+                                        val chunkText = parseCandidateText(jsonStr)
+                                        if (!chunkText.isNullOrBlank()) {
+                                            streamSuccess = true
+                                            emit(chunkText)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                    if (streamSuccess) {
+                        return@flow
+                    }
+                } catch (e: Exception) {
+                    Log.w(tag, "Streaming failed for model $resolvedModel: ${e.message}. Trying fallback...")
                 }
-                if (streamSuccess) {
-                    return@flow
-                }
-            } catch (e: Exception) {
-                Log.w(tag, "Streaming failed for model $resolvedModel: ${e.message}. Trying fallback...")
             }
         }
 
-        // Fallback to non-streaming if streaming endpoints were unreachable
+        // Fallback to non-streaming if streaming endpoints were unreachable or for non-Gemini providers
         when (val nonStreamRes = generateMaxVoiceResponse(trimmedQuery, settings)) {
             is AiResult.Success -> emit(nonStreamRes.text)
             is AiResult.Error -> emit("Error generating voice response: ${nonStreamRes.message}")
         }
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * Executes the AI prompt using the active provider (Gemini, Groq, OpenAI, Anthropic, etc.).
+     */
+    private suspend fun executeAiRequest(prompt: String, settings: AppSettings): AiResult = withContext(Dispatchers.IO) {
+        val activeProvider = SecureKeyManager.getActiveProvider(context)
+        val apiKey = SecureKeyManager.getApiKey(context)
+
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            return@withContext AiResult.Error(
+                "${activeProvider.displayName} API key is not configured. Please set your key in Settings or Keys Manager.",
+                isQuotaOrAuth = true
+            )
+        }
+
+        when (activeProvider) {
+            ApiProvider.GROQ -> executeOpenAiCompatibleRequest(
+                endpoint = "https://api.groq.com/openai/v1/chat/completions",
+                apiKey = apiKey,
+                model = if (settings.modelName.isNotBlank()) settings.modelName else "llama-3.3-70b-versatile",
+                prompt = prompt,
+                providerName = "Groq"
+            )
+            ApiProvider.OPENAI -> executeOpenAiCompatibleRequest(
+                endpoint = "https://api.openai.com/v1/chat/completions",
+                apiKey = apiKey,
+                model = if (settings.modelName.isNotBlank()) settings.modelName else "gpt-4o-mini",
+                prompt = prompt,
+                providerName = "OpenAI"
+            )
+            ApiProvider.OPENROUTER -> executeOpenAiCompatibleRequest(
+                endpoint = "https://openrouter.ai/api/v1/chat/completions",
+                apiKey = apiKey,
+                model = if (settings.modelName.isNotBlank()) settings.modelName else "deepseek/deepseek-r1",
+                prompt = prompt,
+                providerName = "OpenRouter"
+            )
+            ApiProvider.DEEPSEEK -> executeOpenAiCompatibleRequest(
+                endpoint = "https://api.deepseek.com/v1/chat/completions",
+                apiKey = apiKey,
+                model = if (settings.modelName.isNotBlank()) settings.modelName else "deepseek-chat",
+                prompt = prompt,
+                providerName = "DeepSeek"
+            )
+            ApiProvider.PERPLEXITY -> executeOpenAiCompatibleRequest(
+                endpoint = "https://api.perplexity.ai/chat/completions",
+                apiKey = apiKey,
+                model = if (settings.modelName.isNotBlank()) settings.modelName else "sonar-pro",
+                prompt = prompt,
+                providerName = "Perplexity"
+            )
+            ApiProvider.ANTHROPIC -> executeAnthropicRequest(
+                apiKey = apiKey,
+                model = if (settings.modelName.isNotBlank()) settings.modelName else "claude-3-7-sonnet-latest",
+                prompt = prompt
+            )
+            else -> executeGeminiRequest(prompt, settings.modelName)
+        }
+    }
+
+    /**
+     * Executes an OpenAI-compatible chat completion request (Groq, OpenAI, OpenRouter, DeepSeek, Perplexity).
+     */
+    private suspend fun executeOpenAiCompatibleRequest(
+        endpoint: String,
+        apiKey: String,
+        model: String,
+        prompt: String,
+        providerName: String
+    ): AiResult = withContext(Dispatchers.IO) {
+        return@withContext try {
+            withTimeout(25_000L) {
+                val jsonBody = JSONObject().apply {
+                    put("model", model)
+                    val messages = JSONArray().apply {
+                        val sysMsg = JSONObject().apply {
+                            put("role", "system")
+                            put("content", "You are MAX, an intelligent and helpful voice AI assistant.")
+                        }
+                        val userMsg = JSONObject().apply {
+                            put("role", "user")
+                            put("content", prompt)
+                        }
+                        put(sysMsg)
+                        put(userMsg)
+                    }
+                    put("messages", messages)
+                    put("temperature", 0.3)
+                    put("max_tokens", 150)
+                }
+
+                val request = Request.Builder()
+                    .url(endpoint)
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
+                    .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                    .build()
+
+                val (code, responseBody) = try {
+                    httpClient.newCall(request).execute().use { resp ->
+                        Pair(resp.code, resp.body?.string() ?: "")
+                    }
+                } catch (e: Exception) {
+                    Pair(-1, e.message ?: "Network error")
+                }
+
+                if (code in 200..299) {
+                    val root = JSONObject(responseBody)
+                    val choices = root.optJSONArray("choices")
+                    val content = choices?.optJSONObject(0)?.optJSONObject("message")?.optString("content")?.trim()
+                    if (!content.isNullOrBlank()) {
+                        AiResult.Success(content, "$providerName: $model")
+                    } else {
+                        AiResult.Error("$providerName returned an empty response.")
+                    }
+                } else {
+                    val errorMsg = parseErrorMessage(responseBody)
+                    AiResult.Error("$providerName Error (HTTP $code): $errorMsg", isQuotaOrAuth = code in listOf(401, 403, 429))
+                }
+            }
+        } catch (e: Exception) {
+            AiResult.Error("$providerName execution error: ${e.localizedMessage ?: e.message}")
+        }
+    }
+
+    /**
+     * Executes an Anthropic Claude messages request.
+     */
+    private suspend fun executeAnthropicRequest(
+        apiKey: String,
+        model: String,
+        prompt: String
+    ): AiResult = withContext(Dispatchers.IO) {
+        return@withContext try {
+            withTimeout(25_000L) {
+                val jsonBody = JSONObject().apply {
+                    put("model", model)
+                    put("max_tokens", 150)
+                    put("system", "You are MAX, an intelligent and helpful voice AI assistant.")
+                    val messages = JSONArray().apply {
+                        val userMsg = JSONObject().apply {
+                            put("role", "user")
+                            put("content", prompt)
+                        }
+                        put(userMsg)
+                    }
+                    put("messages", messages)
+                }
+
+                val request = Request.Builder()
+                    .url("https://api.anthropic.com/v1/messages")
+                    .addHeader("x-api-key", apiKey)
+                    .addHeader("anthropic-version", "2023-06-01")
+                    .addHeader("content-type", "application/json")
+                    .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                    .build()
+
+                val (code, responseBody) = try {
+                    httpClient.newCall(request).execute().use { resp ->
+                        Pair(resp.code, resp.body?.string() ?: "")
+                    }
+                } catch (e: Exception) {
+                    Pair(-1, e.message ?: "Network error")
+                }
+
+                if (code in 200..299) {
+                    val root = JSONObject(responseBody)
+                    val contentArray = root.optJSONArray("content")
+                    val text = contentArray?.optJSONObject(0)?.optString("text")?.trim()
+                    if (!text.isNullOrBlank()) {
+                        AiResult.Success(text, "Anthropic: $model")
+                    } else {
+                        AiResult.Error("Anthropic returned an empty response.")
+                    }
+                } else {
+                    val errorMsg = parseErrorMessage(responseBody)
+                    AiResult.Error("Anthropic Error (HTTP $code): $errorMsg", isQuotaOrAuth = code in listOf(401, 403, 429))
+                }
+            }
+        } catch (e: Exception) {
+            AiResult.Error("Anthropic execution error: ${e.localizedMessage ?: e.message}")
+        }
+    }
 
     /**
      * Executes the Gemini REST prompt with timeout and robust error classification.
@@ -439,25 +630,234 @@ class GeminiAutoResponderService(private val context: Context) {
     }
 
     /**
-     * Models to attempt during key validation in order of preference.
+     * Models to attempt during Gemini key validation in order of preference.
      */
     private val validationCandidateModels = listOf(
-        "gemini-3.6-flash",
-        "gemini-1.5-flash",
-        "gemini-2.5-flash"
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-flash",
+        "gemini-3.6-flash"
     )
 
     /**
-     * Validates a candidate Gemini API key by making a test request via native REST.
-     * If validated successfully or if rate-limited / network slow, allows saving smoothly.
+     * Auto-detects the provider and triggers a validation check for the detected API upon entry.
+     * Upon successful validation, securely saves the key in SharedPreferences, sets active provider,
+     * and updates version matching in AppSettings.
      */
     suspend fun validateAndSaveApiKey(candidateKey: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
         val trimmed = candidateKey.trim().removeSurrounding("\"").removeSurrounding("'")
         if (trimmed.isBlank()) {
-            return@withContext GeminiKeyValidationResult.Error("Gemini API key cannot be empty.")
+            return@withContext GeminiKeyValidationResult.Error("API key cannot be empty.")
         }
 
-        // Quick sanity check for Google AI Studio API key format (typically AIzaSy...)
+        val detectedProvider = ApiProvider.detectProvider(trimmed)
+        Log.i(tag, "Auto-detected provider: ${detectedProvider.displayName} (${detectedProvider.id}) for key prefix: ${trimmed.take(6)}")
+
+        when (detectedProvider) {
+            ApiProvider.GROQ -> validateGroqKey(trimmed)
+            ApiProvider.OPENAI -> validateOpenAiKey(trimmed)
+            ApiProvider.ANTHROPIC -> validateAnthropicKey(trimmed)
+            ApiProvider.OPENROUTER -> validateOpenRouterKey(trimmed)
+            ApiProvider.DEEPSEEK -> validateDeepSeekKey(trimmed)
+            ApiProvider.PERPLEXITY -> validatePerplexityKey(trimmed)
+            else -> validateGeminiKey(trimmed)
+        }
+    }
+
+    private suspend fun validateGroqKey(trimmed: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
+        try {
+            withTimeout(15_000L) {
+                val request = Request.Builder()
+                    .url("https://api.groq.com/openai/v1/models")
+                    .addHeader("Authorization", "Bearer $trimmed")
+                    .get()
+                    .build()
+
+                val (code, body) = try {
+                    httpClient.newCall(request).execute().use { resp ->
+                        Pair(resp.code, resp.body?.string() ?: "")
+                    }
+                } catch (e: Exception) {
+                    Pair(-1, e.message ?: "Network error")
+                }
+
+                if (code in 200..299 || code == 429) {
+                    SecureKeyManager.saveProviderApiKey(context, ApiProvider.GROQ, trimmed)
+                    SecureKeyManager.setActiveProvider(context, ApiProvider.GROQ)
+                    AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.GROQ.id, ApiProvider.GROQ.defaultModel)
+                    GeminiKeyValidationResult.Success(
+                        message = "✓ Groq API Key verified & activated! Model version set to ${ApiProvider.GROQ.defaultModel}.",
+                        provider = ApiProvider.GROQ,
+                        suggestedModel = ApiProvider.GROQ.defaultModel
+                    )
+                } else if (code == 401) {
+                    GeminiKeyValidationResult.Error("Invalid Groq API Key (gsk_...). Check your key at console.groq.com.")
+                } else {
+                    GeminiKeyValidationResult.Error("Groq validation failed (HTTP $code): ${parseErrorMessage(body)}")
+                }
+            }
+        } catch (e: Exception) {
+            GeminiKeyValidationResult.Error("Groq validation error: ${e.localizedMessage ?: e.message}")
+        }
+    }
+
+    private suspend fun validateOpenAiKey(trimmed: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
+        try {
+            withTimeout(15_000L) {
+                val request = Request.Builder()
+                    .url("https://api.openai.com/v1/models")
+                    .addHeader("Authorization", "Bearer $trimmed")
+                    .get()
+                    .build()
+
+                val (code, body) = try {
+                    httpClient.newCall(request).execute().use { resp ->
+                        Pair(resp.code, resp.body?.string() ?: "")
+                    }
+                } catch (e: Exception) {
+                    Pair(-1, e.message ?: "Network error")
+                }
+
+                if (code in 200..299 || code == 429) {
+                    SecureKeyManager.saveProviderApiKey(context, ApiProvider.OPENAI, trimmed)
+                    SecureKeyManager.setActiveProvider(context, ApiProvider.OPENAI)
+                    AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.OPENAI.id, ApiProvider.OPENAI.defaultModel)
+                    GeminiKeyValidationResult.Success(
+                        message = "✓ OpenAI API Key verified & activated! Model version set to ${ApiProvider.OPENAI.defaultModel}.",
+                        provider = ApiProvider.OPENAI,
+                        suggestedModel = ApiProvider.OPENAI.defaultModel
+                    )
+                } else if (code == 401) {
+                    GeminiKeyValidationResult.Error("Invalid OpenAI API Key. Check your key at platform.openai.com.")
+                } else {
+                    GeminiKeyValidationResult.Error("OpenAI validation failed (HTTP $code): ${parseErrorMessage(body)}")
+                }
+            }
+        } catch (e: Exception) {
+            GeminiKeyValidationResult.Error("OpenAI validation error: ${e.localizedMessage ?: e.message}")
+        }
+    }
+
+    private suspend fun validateAnthropicKey(trimmed: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
+        try {
+            withTimeout(15_000L) {
+                val request = Request.Builder()
+                    .url("https://api.anthropic.com/v1/models")
+                    .addHeader("x-api-key", trimmed)
+                    .addHeader("anthropic-version", "2023-06-01")
+                    .get()
+                    .build()
+
+                val (code, body) = try {
+                    httpClient.newCall(request).execute().use { resp ->
+                        Pair(resp.code, resp.body?.string() ?: "")
+                    }
+                } catch (e: Exception) {
+                    Pair(-1, e.message ?: "Network error")
+                }
+
+                if (code in 200..299 || code == 429) {
+                    SecureKeyManager.saveProviderApiKey(context, ApiProvider.ANTHROPIC, trimmed)
+                    SecureKeyManager.setActiveProvider(context, ApiProvider.ANTHROPIC)
+                    AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.ANTHROPIC.id, ApiProvider.ANTHROPIC.defaultModel)
+                    GeminiKeyValidationResult.Success(
+                        message = "✓ Anthropic API Key verified & activated! Model version set to ${ApiProvider.ANTHROPIC.defaultModel}.",
+                        provider = ApiProvider.ANTHROPIC,
+                        suggestedModel = ApiProvider.ANTHROPIC.defaultModel
+                    )
+                } else if (code == 401) {
+                    GeminiKeyValidationResult.Error("Invalid Anthropic API Key. Check your key at console.anthropic.com.")
+                } else {
+                    GeminiKeyValidationResult.Error("Anthropic validation failed (HTTP $code): ${parseErrorMessage(body)}")
+                }
+            }
+        } catch (e: Exception) {
+            GeminiKeyValidationResult.Error("Anthropic validation error: ${e.localizedMessage ?: e.message}")
+        }
+    }
+
+    private suspend fun validateOpenRouterKey(trimmed: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
+        try {
+            withTimeout(15_000L) {
+                val request = Request.Builder()
+                    .url("https://openrouter.ai/api/v1/models")
+                    .addHeader("Authorization", "Bearer $trimmed")
+                    .get()
+                    .build()
+
+                val (code, body) = try {
+                    httpClient.newCall(request).execute().use { resp ->
+                        Pair(resp.code, resp.body?.string() ?: "")
+                    }
+                } catch (e: Exception) {
+                    Pair(-1, e.message ?: "Network error")
+                }
+
+                if (code in 200..299 || code == 429) {
+                    SecureKeyManager.saveProviderApiKey(context, ApiProvider.OPENROUTER, trimmed)
+                    SecureKeyManager.setActiveProvider(context, ApiProvider.OPENROUTER)
+                    AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.OPENROUTER.id, ApiProvider.OPENROUTER.defaultModel)
+                    GeminiKeyValidationResult.Success(
+                        message = "✓ OpenRouter API Key verified & activated! Model version set to ${ApiProvider.OPENROUTER.defaultModel}.",
+                        provider = ApiProvider.OPENROUTER,
+                        suggestedModel = ApiProvider.OPENROUTER.defaultModel
+                    )
+                } else {
+                    GeminiKeyValidationResult.Error("OpenRouter validation failed (HTTP $code): ${parseErrorMessage(body)}")
+                }
+            }
+        } catch (e: Exception) {
+            GeminiKeyValidationResult.Error("OpenRouter validation error: ${e.localizedMessage ?: e.message}")
+        }
+    }
+
+    private suspend fun validateDeepSeekKey(trimmed: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
+        try {
+            withTimeout(15_000L) {
+                val request = Request.Builder()
+                    .url("https://api.deepseek.com/models")
+                    .addHeader("Authorization", "Bearer $trimmed")
+                    .get()
+                    .build()
+
+                val (code, body) = try {
+                    httpClient.newCall(request).execute().use { resp ->
+                        Pair(resp.code, resp.body?.string() ?: "")
+                    }
+                } catch (e: Exception) {
+                    Pair(-1, e.message ?: "Network error")
+                }
+
+                if (code in 200..299 || code == 429) {
+                    SecureKeyManager.saveProviderApiKey(context, ApiProvider.DEEPSEEK, trimmed)
+                    SecureKeyManager.setActiveProvider(context, ApiProvider.DEEPSEEK)
+                    AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.DEEPSEEK.id, ApiProvider.DEEPSEEK.defaultModel)
+                    GeminiKeyValidationResult.Success(
+                        message = "✓ DeepSeek API Key verified & activated! Model version set to ${ApiProvider.DEEPSEEK.defaultModel}.",
+                        provider = ApiProvider.DEEPSEEK,
+                        suggestedModel = ApiProvider.DEEPSEEK.defaultModel
+                    )
+                } else {
+                    GeminiKeyValidationResult.Error("DeepSeek validation failed (HTTP $code): ${parseErrorMessage(body)}")
+                }
+            }
+        } catch (e: Exception) {
+            GeminiKeyValidationResult.Error("DeepSeek validation error: ${e.localizedMessage ?: e.message}")
+        }
+    }
+
+    private suspend fun validatePerplexityKey(trimmed: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
+        SecureKeyManager.saveProviderApiKey(context, ApiProvider.PERPLEXITY, trimmed)
+        SecureKeyManager.setActiveProvider(context, ApiProvider.PERPLEXITY)
+        AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.PERPLEXITY.id, ApiProvider.PERPLEXITY.defaultModel)
+        GeminiKeyValidationResult.Success(
+            message = "✓ Perplexity API Key saved & activated! Model version set to ${ApiProvider.PERPLEXITY.defaultModel}.",
+            provider = ApiProvider.PERPLEXITY,
+            suggestedModel = ApiProvider.PERPLEXITY.defaultModel
+        )
+    }
+
+    private suspend fun validateGeminiKey(trimmed: String): GeminiKeyValidationResult = withContext(Dispatchers.IO) {
         val looksLikeGoogleApiKey = trimmed.startsWith("AIzaSy") && trimmed.length >= 35
 
         try {
@@ -517,8 +917,14 @@ class GeminiAutoResponderService(private val context: Context) {
                     if (statusCode in 200..299) {
                         val parsedText = parseCandidateText(bodyString)
                         if (!parsedText.isNullOrBlank()) {
-                            SecureKeyManager.saveApiKey(context, trimmed)
-                            return@withTimeout GeminiKeyValidationResult.Success("Gemini API key validated and saved successfully!")
+                            SecureKeyManager.saveProviderApiKey(context, ApiProvider.GEMINI, trimmed)
+                            SecureKeyManager.setActiveProvider(context, ApiProvider.GEMINI)
+                            AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.GEMINI.id, model)
+                            return@withTimeout GeminiKeyValidationResult.Success(
+                                message = "✓ Google Gemini API Key validated & activated! Model version set to $model.",
+                                provider = ApiProvider.GEMINI,
+                                suggestedModel = model
+                            )
                         }
                     }
 
@@ -527,29 +933,45 @@ class GeminiAutoResponderService(private val context: Context) {
                     Log.w(tag, "Model $model validation attempt result (HTTP $statusCode): $lastErrorMessage")
 
                     if (statusCode == 429 || lastErrorMessage.contains("RESOURCE_EXHAUSTED", ignoreCase = true) || lastErrorMessage.contains("rate limit", ignoreCase = true)) {
-                        // Key is valid and recognized by Google servers, but currently throttled/rate-limited
-                        SecureKeyManager.saveApiKey(context, trimmed)
-                        return@withTimeout GeminiKeyValidationResult.Success("Gemini API key verified & saved (Quota rate-limited).")
+                        SecureKeyManager.saveProviderApiKey(context, ApiProvider.GEMINI, trimmed)
+                        SecureKeyManager.setActiveProvider(context, ApiProvider.GEMINI)
+                        AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.GEMINI.id, model)
+                        return@withTimeout GeminiKeyValidationResult.Success(
+                            message = "✓ Gemini API Key verified & activated (Quota rate-limited). Model set to $model.",
+                            provider = ApiProvider.GEMINI,
+                            suggestedModel = model
+                        )
                     } else if (statusCode == 400 || lastErrorMessage.contains("API_KEY_INVALID", ignoreCase = true)) {
                         return@withTimeout GeminiKeyValidationResult.Error("Invalid Gemini API key. Please check your key from Google AI Studio.")
                     } else if (statusCode == 403 || lastErrorMessage.contains("PERMISSION_DENIED", ignoreCase = true)) {
                         return@withTimeout GeminiKeyValidationResult.Error("Permission denied for this key. Ensure Gemini API is enabled.")
                     }
-                    // If 404 / 503, continue loop to next candidate model
                 }
 
                 if (lastCode == 503 || lastErrorMessage.contains("UNAVAILABLE", ignoreCase = true) || lastErrorMessage.contains("overloaded", ignoreCase = true)) {
                     if (looksLikeGoogleApiKey) {
-                        SecureKeyManager.saveApiKey(context, trimmed)
-                        return@withTimeout GeminiKeyValidationResult.Success("Gemini API key saved! (Google servers temporarily overloaded, retry shortly).")
+                        SecureKeyManager.saveProviderApiKey(context, ApiProvider.GEMINI, trimmed)
+                        SecureKeyManager.setActiveProvider(context, ApiProvider.GEMINI)
+                        AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.GEMINI.id, "gemini-3.5-flash")
+                        return@withTimeout GeminiKeyValidationResult.Success(
+                            message = "✓ Gemini API key saved & activated! (Google servers overloaded, retry shortly).",
+                            provider = ApiProvider.GEMINI,
+                            suggestedModel = "gemini-3.5-flash"
+                        )
                     } else {
                         return@withTimeout GeminiKeyValidationResult.Error("Google Gemini service is currently unavailable (HTTP 503). Please try again in a few moments.")
                     }
                 }
 
                 if (looksLikeGoogleApiKey) {
-                    SecureKeyManager.saveApiKey(context, trimmed)
-                    GeminiKeyValidationResult.Success("Gemini API key saved! (Network verification timed out).")
+                    SecureKeyManager.saveProviderApiKey(context, ApiProvider.GEMINI, trimmed)
+                    SecureKeyManager.setActiveProvider(context, ApiProvider.GEMINI)
+                    AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.GEMINI.id, "gemini-3.5-flash")
+                    GeminiKeyValidationResult.Success(
+                        message = "✓ Gemini API key saved & activated! (Network verification timed out).",
+                        provider = ApiProvider.GEMINI,
+                        suggestedModel = "gemini-3.5-flash"
+                    )
                 } else {
                     GeminiKeyValidationResult.Error("Validation failed (HTTP $lastCode): $lastErrorMessage")
                 }
@@ -559,11 +981,23 @@ class GeminiAutoResponderService(private val context: Context) {
             Log.e(tag, "Gemini key validation network/runtime error: $msg", e)
 
             if (msg.contains("RESOURCE_EXHAUSTED", ignoreCase = true) || msg.contains("429", ignoreCase = true)) {
-                SecureKeyManager.saveApiKey(context, trimmed)
-                GeminiKeyValidationResult.Success("Gemini API key verified & saved (Quota rate-limited).")
+                SecureKeyManager.saveProviderApiKey(context, ApiProvider.GEMINI, trimmed)
+                SecureKeyManager.setActiveProvider(context, ApiProvider.GEMINI)
+                AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.GEMINI.id, "gemini-3.5-flash")
+                GeminiKeyValidationResult.Success(
+                    message = "✓ Gemini API key verified & activated (Quota rate-limited).",
+                    provider = ApiProvider.GEMINI,
+                    suggestedModel = "gemini-3.5-flash"
+                )
             } else if (looksLikeGoogleApiKey || msg.contains("timeout", ignoreCase = true)) {
-                SecureKeyManager.saveApiKey(context, trimmed)
-                GeminiKeyValidationResult.Success("Gemini API key saved! (Network verification timed out).")
+                SecureKeyManager.saveProviderApiKey(context, ApiProvider.GEMINI, trimmed)
+                SecureKeyManager.setActiveProvider(context, ApiProvider.GEMINI)
+                AppSettingsRepository.getInstance(context).setAiProvider(ApiProvider.GEMINI.id, "gemini-3.5-flash")
+                GeminiKeyValidationResult.Success(
+                    message = "✓ Gemini API key saved & activated! (Network verification timed out).",
+                    provider = ApiProvider.GEMINI,
+                    suggestedModel = "gemini-3.5-flash"
+                )
             } else {
                 GeminiKeyValidationResult.Error("Validation failed: $msg")
             }
