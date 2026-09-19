@@ -27,6 +27,10 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -503,53 +507,71 @@ fun AutoResponderScreen(viewModel: AutoResponderViewModel) {
                     }
                 )
 
-                // Tab Content Body
+                // Dedicated Category Page Content Body with smooth animated horizontal transitions
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                 ) {
-                    when (currentSection) {
-                        0 -> {
-                            // Section 0: Voice & AI
-                            when (voiceSubTab) {
-                                0 -> VoiceCallAnnouncerTab(viewModel, settings, currentTheme)
-                                else -> WhatsAppControlTab(viewModel, currentTheme)
-                            }
-                        }
-                        1 -> {
-                            // Section 1: Hardware & Tools
-                            when (hardwareSubTab) {
-                                0 -> HardwareSystemControlTab(viewModel, settings, currentTheme)
-                                1 -> AppMediaControlTab(viewModel, settings, currentTheme)
-                                2 -> CameraAndSelfieTab(viewModel, currentTheme)
-                                else -> AutoScrollTab(viewModel, currentTheme)
-                            }
-                        }
-                        else -> {
-                            // Section 2: Security & Settings
-                            when (securitySubTab) {
-                                0 -> IntegratedSettingsTab(
-                                    viewModel = viewModel,
-                                    settings = settings,
-                                    missingPermissions = missingPermissions,
-                                    theme = currentTheme,
-                                    onRequestPermissions = {
-                                        permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
-                                    },
-                                    onOpenApiKeyDialog = { showApiKeyDialog = true }
+                    androidx.compose.animation.AnimatedContent(
+                        targetState = currentSection,
+                        transitionSpec = {
+                            if (targetState > initialState) {
+                                (androidx.compose.animation.slideInHorizontally { width -> width } + androidx.compose.animation.fadeIn()).togetherWith(
+                                    androidx.compose.animation.slideOutHorizontally { width -> -width } + androidx.compose.animation.fadeOut()
                                 )
-                                1 -> EmergencySosTab(viewModel, currentTheme)
-                                2 -> BlocklistSpamTab(viewModel, settings, currentTheme)
-                                else -> WorkbenchAndEventsTab(viewModel, settings, events, callHistoryLogs, acceptedCallsCount, rejectedCallsCount, simCallState, currentTheme)
+                            } else {
+                                (androidx.compose.animation.slideInHorizontally { width -> -width } + androidx.compose.animation.fadeIn()).togetherWith(
+                                    androidx.compose.animation.slideOutHorizontally { width -> width } + androidx.compose.animation.fadeOut()
+                                )
+                            }
+                        },
+                        label = "CategoryPageTransition"
+                    ) { sectionIndex ->
+                        when (sectionIndex) {
+                            0 -> {
+                                // Dedicated Page: Voice AI Settings & Controls
+                                when (voiceSubTab) {
+                                    0 -> VoiceCallAnnouncerTab(viewModel, settings, currentTheme)
+                                    else -> WhatsAppControlTab(viewModel, currentTheme)
+                                }
+                            }
+                            1 -> {
+                                // Dedicated Page: Hardware Settings & Controls
+                                when (hardwareSubTab) {
+                                    0 -> HardwareSystemControlTab(viewModel, settings, currentTheme)
+                                    1 -> AppMediaControlTab(viewModel, settings, currentTheme)
+                                    2 -> CameraAndSelfieTab(viewModel, currentTheme)
+                                    else -> AutoScrollTab(viewModel, currentTheme)
+                                }
+                            }
+                            else -> {
+                                // Dedicated Page: Security & SOS Settings & Controls
+                                when (securitySubTab) {
+                                    0 -> IntegratedSettingsTab(
+                                        viewModel = viewModel,
+                                        settings = settings,
+                                        missingPermissions = missingPermissions,
+                                        theme = currentTheme,
+                                        onRequestPermissions = {
+                                            permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
+                                        },
+                                        onOpenApiKeyDialog = { showApiKeyDialog = true }
+                                    )
+                                    1 -> EmergencySosTab(viewModel, currentTheme)
+                                    2 -> BlocklistSpamTab(viewModel, settings, currentTheme)
+                                    else -> WorkbenchAndEventsTab(viewModel, settings, events, callHistoryLogs, acceptedCallsCount, rejectedCallsCount, simCallState, currentTheme)
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Bottom Assistant Interaction Dock: Live Gemini Response + Search/Text Input Box + Dedicated Mic + Siri Glowing Wave
-            AssistantBottomInteractionDock(
+            // Bottom Category Toggles Dock: Dedicated Toggles for 'Voice AI', 'Hardware', and 'Security & SOS'
+            MaxCategoryBottomToggleDock(
+                currentSection = currentSection,
+                onSectionSelected = { currentSection = it },
                 searchQuery = searchQuery,
                 onQueryChanged = { viewModel.onSearchQueryChanged(it) },
                 onSendQuery = { viewModel.sendTextMessage(it) },
@@ -3159,11 +3181,15 @@ fun SiriEventLogItem(
 }
 
 /**
- * Prominent Search/Text Input Box, Dedicated Microphone Trigger,
- * Siri-Style Glowing Wave Animation Visualizer, and Live Gemini AI Response Dock.
+ * Dedicated Bottom Navigation & Category Toggles Dock:
+ * Houses dedicated Category Toggles for 'Voice AI', 'Hardware', and 'Security & SOS',
+ * configuring click listeners so tapping any category immediately opens that specific section page.
+ * Also includes instant Voice Mic trigger and Live Gemini AI response surface.
  */
 @Composable
-fun AssistantBottomInteractionDock(
+fun MaxCategoryBottomToggleDock(
+    currentSection: Int,
+    onSectionSelected: (Int) -> Unit,
     searchQuery: String,
     onQueryChanged: (String) -> Unit,
     onSendQuery: (String) -> Unit,
@@ -3183,6 +3209,14 @@ fun AssistantBottomInteractionDock(
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     var copiedFeedback by remember { mutableStateOf(false) }
 
+    val categories = remember {
+        listOf(
+            Triple("Voice AI", "Calls & TTS", Icons.Default.RecordVoiceOver),
+            Triple("Hardware", "Toggles & Media", Icons.Default.Tune),
+            Triple("Security & SOS", "Safety & Settings", Icons.Default.Security)
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -3190,15 +3224,15 @@ fun AssistantBottomInteractionDock(
                 Brush.verticalGradient(
                     colors = listOf(
                         Color.Transparent,
-                        Color(0xE6060B14),
-                        Color(0xF8060B14)
+                        Color(0xF0060B14),
+                        Color(0xFF060B14)
                     )
                 )
             )
             .navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 1. Live Gemini AI Response Card
+        // 1. Live Gemini AI Response Card (if active)
         AnimatedVisibility(
             visible = !latestResponse.isNullOrBlank() || isProcessing,
             enter = fadeIn() + expandVertically(),
@@ -3207,10 +3241,10 @@ fun AssistantBottomInteractionDock(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(16.dp),
                 color = Color(0xF20F172A),
-                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.4f)),
+                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.45f)),
                 shadowElevation = 8.dp
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
@@ -3299,124 +3333,157 @@ fun AssistantBottomInteractionDock(
             }
         }
 
-        // 2. Status Pill & Floating System Overlay Quick Toggle Chip
-        Row(
+        // 2. DEDICATED CATEGORY TOGGLES BAR: 'Voice AI' | 'Hardware' | 'Security & SOS'
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 12.dp, vertical = 3.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xDE0B1220),
+            border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.25f)),
+            shadowElevation = 6.dp
         ) {
             Row(
                 modifier = Modifier
-                    .weight(1f, fill = false)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xD90F172A))
-                    .border(0.5.dp, theme.primaryAccent.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isListening) Color(0xFFEF4444)
-                            else if (isSpeaking) Color(0xFF10B981)
-                            else theme.primaryAccent
-                        )
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = statusText.ifBlank { "Tap mic to speak or type to ask Gemini" },
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+                categories.forEachIndexed { index, (title, subtitle, icon) ->
+                    val isSelected = currentSection == index
+                    val testTag = when (index) {
+                        0 -> "category_toggle_voice_ai"
+                        1 -> "category_toggle_hardware"
+                        else -> "category_toggle_security_sos"
+                    }
 
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isOverlayActive) theme.primaryAccent.copy(alpha = 0.25f) else Color(0xD90F172A),
-                border = BorderStroke(
-                    1.dp,
-                    if (isOverlayActive) theme.primaryAccent else theme.primaryAccent.copy(alpha = 0.3f)
-                ),
-                modifier = Modifier
-                    .clickable { onToggleOverlay() }
-                    .testTag("quick_toggle_overlay_chip")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Layers,
-                        contentDescription = "System Overlay",
-                        tint = if (isOverlayActive) theme.primaryAccent else Color.LightGray,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (isOverlayActive) "Overlay ON" else "System Overlay",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isOverlayActive) theme.primaryAccent else Color.White.copy(alpha = 0.8f)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                if (isSelected) {
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            theme.primaryAccent.copy(alpha = 0.28f),
+                                            theme.secondaryAccent.copy(alpha = 0.18f)
+                                        )
+                                    )
+                                } else {
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.04f),
+                                            Color.White.copy(alpha = 0.02f)
+                                        )
+                                    )
+                                }
+                            )
+                            .border(
+                                width = if (isSelected) 1.5.dp else 0.5.dp,
+                                color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .clickable {
+                                onSectionSelected(index)
+                            }
+                            .testTag(testTag)
+                            .padding(vertical = 7.dp, horizontal = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = title,
+                                    tint = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.55f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                if (isSelected) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(5.dp)
+                                            .clip(CircleShape)
+                                            .background(theme.primaryAccent)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = title,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.75f),
+                                maxLines = 1,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Text(
+                                text = subtitle,
+                                fontSize = 8.5.sp,
+                                color = if (isSelected) theme.secondaryAccent else Color.White.copy(alpha = 0.4f),
+                                maxLines = 1,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // 3. Search / Text Input Box with Dedicated Microphone Button
+        // 3. Mini Assistant Voice Trigger & Text Input Row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 14.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
                 modifier = Modifier
                     .weight(1f)
-                    .height(52.dp),
-                shape = RoundedCornerShape(26.dp),
+                    .height(46.dp),
+                shape = RoundedCornerShape(23.dp),
                 color = Color(0xF20F172A),
                 border = BorderStroke(
                     1.dp,
                     Brush.horizontalGradient(
                         colors = listOf(
-                            theme.primaryAccent.copy(alpha = 0.6f),
-                            theme.secondaryAccent.copy(alpha = 0.4f)
+                            theme.primaryAccent.copy(alpha = 0.5f),
+                            theme.secondaryAccent.copy(alpha = 0.3f)
                         )
                     )
                 ),
-                shadowElevation = 6.dp
+                shadowElevation = 4.dp
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 14.dp),
+                        .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = "Gemini AI",
                         tint = theme.primaryAccent,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(17.dp)
                     )
 
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Box(modifier = Modifier.weight(1f)) {
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Ask MAX Assistant anything...",
+                                text = statusText.ifBlank { "Ask MAX Assistant anything..." },
                                 color = Color.White.copy(alpha = 0.45f),
-                                fontSize = 14.sp
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         BasicTextField(
@@ -3425,7 +3492,7 @@ fun AssistantBottomInteractionDock(
                             singleLine = true,
                             textStyle = TextStyle(
                                 color = Color.White,
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Normal
                             ),
                             keyboardOptions = KeyboardOptions(
@@ -3447,20 +3514,20 @@ fun AssistantBottomInteractionDock(
                     if (searchQuery.isNotEmpty()) {
                         IconButton(
                             onClick = { onQueryChanged("") },
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = "Clear",
                                 tint = Color.LightGray,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                         }
 
                         IconButton(
                             onClick = { onSendQuery(searchQuery) },
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(28.dp)
                                 .clip(CircleShape)
                                 .background(theme.primaryAccent)
                                 .testTag("send_message_button")
@@ -3469,14 +3536,14 @@ fun AssistantBottomInteractionDock(
                                 imageVector = Icons.Default.Send,
                                 contentDescription = "Send to Gemini",
                                 tint = Color.Black,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(8.dp))
 
             val micPulse by rememberInfiniteTransition(label = "mic_pulse").animateFloat(
                 initialValue = 0.95f,
@@ -3490,7 +3557,7 @@ fun AssistantBottomInteractionDock(
 
             Box(
                 modifier = Modifier
-                    .size(52.dp)
+                    .size(46.dp)
                     .scale(micPulse)
                     .clip(CircleShape)
                     .background(
@@ -3507,12 +3574,12 @@ fun AssistantBottomInteractionDock(
                     imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
                     contentDescription = "Manual Voice Input",
                     tint = if (isListening) Color.White else Color.Black,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
 
-        // 4. Real-time dynamic visualizer Canvas reacting to microphone audio amplitude
+        // 4. Dynamic Real-time Siri Ribbon Wave Visualizer
         RealtimeAudioVisualizerCanvas(
             audioAmplitude = rmsDbLevel,
             isListening = isListening,
@@ -3520,10 +3587,52 @@ fun AssistantBottomInteractionDock(
             isSpeaking = isSpeaking,
             theme = theme,
             mode = VisualizerMode.RIBBON_WAVE,
-            height = 38.dp,
+            height = 32.dp,
             modifier = Modifier.fillMaxWidth()
         )
     }
+}
+
+/**
+ * Backward compatibility alias for AssistantBottomInteractionDock
+ */
+@Composable
+fun AssistantBottomInteractionDock(
+    searchQuery: String,
+    onQueryChanged: (String) -> Unit,
+    onSendQuery: (String) -> Unit,
+    isListening: Boolean,
+    isProcessing: Boolean,
+    isSpeaking: Boolean,
+    rmsDbLevel: Float,
+    statusText: String,
+    latestResponse: String?,
+    onDismissResponse: () -> Unit,
+    isOverlayActive: Boolean,
+    onToggleOverlay: () -> Unit,
+    onMicClick: () -> Unit,
+    theme: SiriThemeColors,
+    modifier: Modifier = Modifier
+) {
+    MaxCategoryBottomToggleDock(
+        currentSection = 0,
+        onSectionSelected = {},
+        searchQuery = searchQuery,
+        onQueryChanged = onQueryChanged,
+        onSendQuery = onSendQuery,
+        isListening = isListening,
+        isProcessing = isProcessing,
+        isSpeaking = isSpeaking,
+        rmsDbLevel = rmsDbLevel,
+        statusText = statusText,
+        latestResponse = latestResponse,
+        onDismissResponse = onDismissResponse,
+        isOverlayActive = isOverlayActive,
+        onToggleOverlay = onToggleOverlay,
+        onMicClick = onMicClick,
+        theme = theme,
+        modifier = modifier
+    )
 }
 
 // ANIMATED Siri Voice Orb Canvas Component
