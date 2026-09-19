@@ -162,25 +162,39 @@ class GeminiAutoResponderService(private val context: Context) {
             return@withContext AiResult.Error("Query is empty.")
         }
 
+        val contextHistory = ConversationContextManager.getInstance().getFormattedHistoryForPrompt()
+
         // Fast Local Rule Engine check (0ms latency response)
         FastLocalRuleEngine.evaluate(userQuery)?.let { fastReply ->
             Log.i(tag, "Fast Local Rule Engine matched instant voice response: \"$fastReply\" (0ms API latency saved)")
+            ConversationContextManager.getInstance().addTurn("user", userQuery)
+            ConversationContextManager.getInstance().addTurn("assistant", fastReply)
             return@withContext AiResult.Success(fastReply, "Fast Local Rule Engine")
         }
 
         val prompt = buildString {
             appendLine("You are MAX, an intelligent and helpful AI assistant.")
-            appendLine("User Query: \"$userQuery\"")
+            if (contextHistory.isNotBlank()) {
+                appendLine(contextHistory)
+                appendLine()
+            }
+            appendLine("Current User Query: \"$userQuery\"")
             appendLine()
             appendLine("SYSTEM RULES:")
             appendLine("1. Keep all responses concise, direct, and conversational (1-3 sentences max).")
-            appendLine("2. Format text specifically for Text-to-Speech engines: avoid complex Markdown, bullet points, code blocks, or special symbols.")
-            appendLine("3. Speak naturally in clear, engaging Hindi or English based on user input.")
-            appendLine("4. Avoid unnecessary fillers or polite intros; provide answers immediately.")
-            appendLine("5. Output ONLY the response text directly.")
+            appendLine("2. Evaluate the current query relative to previous conversation history if provided (resolve pronouns like 'he', 'she', 'it', 'that', or follow-up questions).")
+            appendLine("3. Format text specifically for Text-to-Speech engines: avoid complex Markdown, bullet points, code blocks, or special symbols.")
+            appendLine("4. Speak naturally in clear, engaging Hindi or English based on user input.")
+            appendLine("5. Avoid unnecessary fillers or polite intros; provide answers immediately.")
+            appendLine("6. Output ONLY the response text directly.")
         }
 
-        executeGeminiRequest(prompt, settings.modelName)
+        val result = executeGeminiRequest(prompt, settings.modelName)
+        if (result is AiResult.Success) {
+            ConversationContextManager.getInstance().addTurn("user", userQuery)
+            ConversationContextManager.getInstance().addTurn("assistant", result.text)
+        }
+        result
     }
 
     /**
@@ -197,9 +211,13 @@ class GeminiAutoResponderService(private val context: Context) {
             return@flow
         }
 
+        val contextHistory = ConversationContextManager.getInstance().getFormattedHistoryForPrompt()
+
         // Fast Local Rule Engine check (0ms latency response)
         FastLocalRuleEngine.evaluate(trimmedQuery)?.let { fastReply ->
             Log.i(tag, "Fast Local Rule Engine matched streaming voice query: \"$fastReply\" (0ms API latency saved)")
+            ConversationContextManager.getInstance().addTurn("user", trimmedQuery)
+            ConversationContextManager.getInstance().addTurn("assistant", fastReply)
             emit(fastReply)
             return@flow
         }
@@ -212,14 +230,19 @@ class GeminiAutoResponderService(private val context: Context) {
 
         val prompt = buildString {
             appendLine("You are MAX, an intelligent and helpful AI assistant.")
-            appendLine("User Query: \"$trimmedQuery\"")
+            if (contextHistory.isNotBlank()) {
+                appendLine(contextHistory)
+                appendLine()
+            }
+            appendLine("Current User Query: \"$trimmedQuery\"")
             appendLine()
             appendLine("SYSTEM RULES:")
             appendLine("1. Keep all responses concise, direct, and conversational (1-3 sentences max).")
-            appendLine("2. Format text specifically for Text-to-Speech engines: avoid complex Markdown, bullet points, code blocks, or special symbols.")
-            appendLine("3. Speak naturally in clear, engaging Hindi or English based on user input.")
-            appendLine("4. Avoid unnecessary fillers or polite intros; provide answers immediately.")
-            appendLine("5. Output ONLY the response text directly.")
+            appendLine("2. Evaluate the current query relative to previous conversation history if provided (resolve pronouns like 'he', 'she', 'it', 'that', or follow-up questions).")
+            appendLine("3. Format text specifically for Text-to-Speech engines: avoid complex Markdown, bullet points, code blocks, or special symbols.")
+            appendLine("4. Speak naturally in clear, engaging Hindi or English based on user input.")
+            appendLine("5. Avoid unnecessary fillers or polite intros; provide answers immediately.")
+            appendLine("6. Output ONLY the response text directly.")
         }
 
         val modelName = settings.modelName.trim()

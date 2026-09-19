@@ -69,11 +69,19 @@ class AutoResponderApp : Application() {
     lateinit var speakerVerificationManager: com.example.biometrics.SpeakerVerificationManager
         private set
 
+    lateinit var conversationContextManager: com.example.ai.ConversationContextManager
+        private set
+
+    lateinit var directCallManager: com.example.telephony.DirectCallManager
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         database = AppDatabase.getInstance(this)
         settingsRepository = AppSettingsRepository.getInstance(this)
+        conversationContextManager = com.example.ai.ConversationContextManager.getInstance()
+        directCallManager = com.example.telephony.DirectCallManager(this)
         geminiService = GeminiAutoResponderService(this)
         smsSender = SmsSender(this)
         callController = CallController(this)

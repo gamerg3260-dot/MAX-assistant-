@@ -1698,6 +1698,7 @@ fun HardwareSystemControlTab(
                                 onClick = {
                                     val res = viewModel.appLauncherManager.openAppByName(appKey)
                                     appLaunchFeedback = res.feedbackMessage
+                                    viewModel.appLauncherManager.launchIntentNow(res.launchIntent)
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent.copy(alpha = 0.2f)),
                                 border = BorderStroke(1.dp, theme.primaryAccent),
@@ -1720,6 +1721,7 @@ fun HardwareSystemControlTab(
                                 onClick = {
                                     val res = viewModel.appLauncherManager.openAppByName(appKey)
                                     appLaunchFeedback = res.feedbackMessage
+                                    viewModel.appLauncherManager.launchIntentNow(res.launchIntent)
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = theme.secondaryAccent.copy(alpha = 0.2f)),
                                 border = BorderStroke(1.dp, theme.secondaryAccent),

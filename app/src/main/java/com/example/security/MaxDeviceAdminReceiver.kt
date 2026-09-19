@@ -20,6 +20,7 @@ class MaxDeviceAdminReceiver : DeviceAdminReceiver() {
         triggerSecurityActions(context)
     }
 
+    @Suppress("DEPRECATION")
     override fun onPasswordFailed(context: Context, intent: Intent) {
         super.onPasswordFailed(context, intent)
         Log.w(tag, ">>> ACTION_PASSWORD_FAILED received! (Legacy call) <<<")

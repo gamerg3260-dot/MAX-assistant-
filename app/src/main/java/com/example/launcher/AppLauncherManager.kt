@@ -10,7 +10,8 @@ import java.util.Locale
 data class AppLaunchResult(
     val isHandled: Boolean,
     val feedbackMessage: String,
-    val packageName: String? = null
+    val packageName: String? = null,
+    val launchIntent: Intent? = null
 )
 
 /**
@@ -74,7 +75,23 @@ class AppLauncherManager(private val context: Context) {
     )
 
     /**
-     * Resolves the package name for a target app name query and opens it using an explicit Intent.
+     * Executes context.startActivity(launchIntent) with Intent.FLAG_ACTIVITY_NEW_TASK.
+     */
+    fun launchIntentNow(intent: Intent?): Boolean {
+        if (intent == null) return false
+        return try {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            context.startActivity(intent)
+            Log.i(tag, "Successfully executed context.startActivity(launchIntent)")
+            true
+        } catch (e: Exception) {
+            Log.e(tag, "Error starting activity via launch intent: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Resolves the package name for a target app name query and creates explicit launch Intent.
      * @param appNameQuery Target app name (e.g. "YouTube", "WhatsApp", "Calculator")
      */
     fun openAppByName(appNameQuery: String): AppLaunchResult {
@@ -103,17 +120,17 @@ class AppLauncherManager(private val context: Context) {
                 val appLabel = resolveInfo.loadLabel(packageManager).toString().lowercase(Locale.ROOT)
                 val packageName = resolveInfo.activityInfo.packageName.lowercase(Locale.ROOT)
 
-                if (appLabel == cleanQuery || appLabel.contains(cleanQuery) || cleanQuery.contains(appLabel)) {
+                if (appLabel == cleanQuery || appLabel.contains(cleanQuery) || cleanQuery.contains(appLabel) || packageName.contains(cleanQuery)) {
                     val launchIntent = packageManager.getLaunchIntentForPackage(resolveInfo.activityInfo.packageName)
                     if (launchIntent != null) {
-                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(launchIntent)
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
                         val displayName = resolveInfo.loadLabel(packageManager).toString()
-                        Log.i(tag, "Successfully launched app: $displayName ($packageName)")
+                        Log.i(tag, "Successfully resolved app package: $displayName (${resolveInfo.activityInfo.packageName})")
                         return AppLaunchResult(
                             isHandled = true,
                             feedbackMessage = "Opening $displayName...",
-                            packageName = resolveInfo.activityInfo.packageName
+                            packageName = resolveInfo.activityInfo.packageName,
+                            launchIntent = launchIntent
                         )
                     }
                 }
@@ -131,34 +148,42 @@ class AppLauncherManager(private val context: Context) {
         return AppLaunchResult(
             isHandled = false,
             feedbackMessage = "Could not find application \"$appNameQuery\" installed on this device.",
-            packageName = null
+            packageName = null,
+            launchIntent = null
         )
     }
 
     /**
-     * Finds explicit launch Intent for given package name and triggers context.startActivity(launchIntent).
+     * Finds explicit launch Intent for given package name and returns result with launchIntent.
      */
     fun launchAppByPackageName(packageName: String, displayName: String = packageName): AppLaunchResult {
         return try {
             val pm = context.packageManager
             val launchIntent = pm.getLaunchIntentForPackage(packageName)
             if (launchIntent != null) {
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(launchIntent)
-                Log.i(tag, "Successfully launched package: $packageName")
-                val formattedName = displayName.split(" ").joinToString(" ") { word ->
-                    word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                Log.i(tag, "Successfully resolved launch intent for package: $packageName")
+                val formattedName = if (displayName != packageName) displayName else {
+                    try {
+                        val appInfo = pm.getApplicationInfo(packageName, 0)
+                        pm.getApplicationLabel(appInfo).toString()
+                    } catch (_: Exception) {
+                        displayName.split(" ").joinToString(" ") { word ->
+                            word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+                        }
+                    }
                 }
                 AppLaunchResult(
                     isHandled = true,
                     feedbackMessage = "Opening $formattedName...",
-                    packageName = packageName
+                    packageName = packageName,
+                    launchIntent = launchIntent
                 )
             } else {
-                AppLaunchResult(false, "App package $packageName is not installed or cannot be launched.")
+                AppLaunchResult(false, "App package $packageName is not installed or cannot be launched.", packageName = packageName)
             }
         } catch (e: Exception) {
-            Log.e(tag, "Error launching package $packageName: ${e.message}", e)
+            Log.e(tag, "Error resolving package $packageName: ${e.message}", e)
             AppLaunchResult(false, "Failed to launch app: ${e.localizedMessage}")
         }
     }
@@ -171,32 +196,28 @@ class AppLauncherManager(private val context: Context) {
             when {
                 query.contains("camera") || query.contains("कैमरा") -> {
                     val intent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
                     }
-                    context.startActivity(intent)
-                    AppLaunchResult(true, "Opening Camera...", "com.android.camera")
+                    AppLaunchResult(true, "Opening Camera...", "com.android.camera", intent)
                 }
                 query.contains("calculator") || query.contains("कैल्कुलेटर") || query.contains("calc") -> {
                     val intent = Intent(Intent.ACTION_MAIN).apply {
                         addCategory(Intent.CATEGORY_APP_CALCULATOR)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
                     }
-                    context.startActivity(intent)
-                    AppLaunchResult(true, "Opening Calculator...", "com.google.android.calculator")
+                    AppLaunchResult(true, "Opening Calculator...", "com.google.android.calculator", intent)
                 }
                 query.contains("settings") || query.contains("सेटिंग्स") -> {
                     val intent = Intent(android.provider.Settings.ACTION_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
                     }
-                    context.startActivity(intent)
-                    AppLaunchResult(true, "Opening Settings...", "com.android.settings")
+                    AppLaunchResult(true, "Opening Settings...", "com.android.settings", intent)
                 }
                 query.contains("dialer") || query.contains("phone") || query.contains("फोन") -> {
                     val intent = Intent(Intent.ACTION_DIAL).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
                     }
-                    context.startActivity(intent)
-                    AppLaunchResult(true, "Opening Phone Dialer...", "com.google.android.dialer")
+                    AppLaunchResult(true, "Opening Phone Dialer...", "com.google.android.dialer", intent)
                 }
                 else -> AppLaunchResult(false, "No fallback available for $query")
             }
@@ -208,7 +229,7 @@ class AppLauncherManager(private val context: Context) {
 
     /**
      * Parses spoken commands containing intent keywords (e.g. "Open YouTube", "YouTube kholo", "Launch WhatsApp"),
-     * extracts the app name, finds its package name, and opens the app immediately via Intent.
+     * extracts the app name, finds its package name, and returns the launch intent result.
      */
     fun processVoiceAppLaunchCommand(spokenCommand: String): AppLaunchResult {
         val q = spokenCommand.lowercase(Locale.ROOT).trim()
@@ -244,3 +265,4 @@ class AppLauncherManager(private val context: Context) {
         return openAppByName(targetAppName)
     }
 }
+

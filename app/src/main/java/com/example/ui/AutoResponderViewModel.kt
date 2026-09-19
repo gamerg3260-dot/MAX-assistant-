@@ -63,6 +63,7 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
     val callController = app.callController
     val swaraTtsService = app.swaraTtsService
     val appLauncherManager = app.appLauncherManager
+    val directCallManager = app.directCallManager
     val intruderSecurityManager = app.intruderSecurityManager
     val speakerVerificationManager = app.speakerVerificationManager
 
@@ -606,7 +607,27 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
 
         viewModelScope.launch {
             _isGeminiProcessing.value = true
-            // 1. Check for Emergency SOS & Live Location voice commands
+
+            // 1. Direct Calling Intent (Immediate ACTION_CALL, No UI/Confirmation Delay)
+            val callRes = directCallManager.processVoiceCallCommand(spokenText)
+            if (callRes.isHandled) {
+                val feedback = callRes.feedbackMessage
+                _isGeminiProcessing.value = false
+                _latestAssistantResponse.value = feedback
+                _sttPipelineStatus.value = "Direct Call: $feedback"
+
+                com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, "DIRECT_CALL")
+                com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
+
+                val currentList = _sttConversationLog.value.toMutableList()
+                currentList.add(Pair(spokenText, feedback))
+                _sttConversationLog.value = currentList
+
+                swaraTtsService.speak(feedback)
+                return@launch
+            }
+
+            // 2. Check for Emergency SOS & Live Location voice commands
             val sosRes = emergencySosManager.processVoiceSosCommand(spokenText)
             if (sosRes.isHandled) {
                 val feedback = sosRes.feedbackMessage
@@ -662,6 +683,9 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 _latestAssistantResponse.value = feedback
                 _sttPipelineStatus.value = "Hardware Action: $feedback"
 
+                com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, "HARDWARE_TOGGLE")
+                com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
+
                 val currentList = _sttConversationLog.value.toMutableList()
                 currentList.add(Pair(spokenText, feedback))
                 _sttConversationLog.value = currentList
@@ -678,11 +702,25 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 _latestAssistantResponse.value = feedback
                 _sttPipelineStatus.value = "App Launcher: $feedback"
 
+                com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText, "APP_LAUNCH")
+                com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
+
                 val currentList = _sttConversationLog.value.toMutableList()
                 currentList.add(Pair(spokenText, feedback))
                 _sttConversationLog.value = currentList
 
-                swaraTtsService.speak(feedback)
+                val intentToLaunch = appLaunchRes.launchIntent
+                if (intentToLaunch != null) {
+                    swaraTtsService.speak(feedback, onDone = {
+                        appLauncherManager.launchIntentNow(intentToLaunch)
+                    })
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(1200)
+                        appLauncherManager.launchIntentNow(intentToLaunch)
+                    }
+                } else {
+                    swaraTtsService.speak(feedback)
+                }
                 return@launch
             }
 
@@ -709,6 +747,8 @@ class AutoResponderViewModel(application: Application) : AndroidViewModel(applic
                 }
 
                 if (fullText.isNotBlank()) {
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenText)
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", fullText)
                     val currentList = _sttConversationLog.value.toMutableList()
                     currentList.add(Pair(spokenText, fullText))
                     _sttConversationLog.value = currentList

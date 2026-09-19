@@ -19,6 +19,7 @@ object PermissionHelper {
         get() {
             val baseList = mutableListOf(
                 Manifest.permission.ANSWER_PHONE_CALLS,
+                Manifest.permission.CALL_PHONE,
                 Manifest.permission.READ_PHONE_STATE,
                 Manifest.permission.READ_CALL_LOG,
                 Manifest.permission.READ_CONTACTS,
@@ -43,6 +44,7 @@ object PermissionHelper {
     val VOICE_ASSISTANT_PERMISSIONS: Array<String>
         get() = arrayOf(
             Manifest.permission.ANSWER_PHONE_CALLS,
+            Manifest.permission.CALL_PHONE,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.RECORD_AUDIO
@@ -70,6 +72,7 @@ object PermissionHelper {
     fun getPermissionLabel(permission: String): String {
         return when (permission) {
             Manifest.permission.ANSWER_PHONE_CALLS -> "Answer Phone Calls (Voice Call Control)"
+            Manifest.permission.CALL_PHONE -> "Make Direct Phone Calls (Instant Voice Calling)"
             Manifest.permission.RECORD_AUDIO -> "Record Audio (Voice Command Speech Recognition)"
             Manifest.permission.READ_PHONE_STATE -> "Read Phone State (Detect Incoming Calls)"
             Manifest.permission.READ_CONTACTS -> "Read Contacts (Caller ID Name Resolution)"

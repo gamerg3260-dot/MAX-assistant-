@@ -48,9 +48,34 @@ class CallBroadcastReceiver : BroadcastReceiver() {
                 isIncomingRinging = true
                 isCallAnswered = false
                 lastState = TelephonyManager.EXTRA_STATE_RINGING
+
+                val number = savedIncomingNumber ?: incomingNumber
+                Log.d(tag, "Incoming call ringing detected: $number")
+
+                val app = context.applicationContext as? AutoResponderApp ?: AutoResponderApp.instance
+                val settings = app.settingsRepository.settings.value
+
+                // 1. If foreground service is running, notify it with the incoming number
+                val service = com.example.service.MaxAssistantForegroundService.currentServiceInstance
+                if (service != null) {
+                    service.onExternalIncomingCallReceived(number)
+                } else if (settings.isCallAnnouncerEnabled) {
+                    // 2. Announce incoming caller using CallAnnouncer (resolving contact or reading number aloud)
+                    val callerNameOrFormattedNum = com.example.voice.ContactResolver.resolveCallerName(context, number)
+                    Log.i(tag, "Announcing incoming caller via CallAnnouncer: $callerNameOrFormattedNum")
+                    app.callAnnouncer.announceCaller(
+                        callerNameOrNumber = callerNameOrFormattedNum,
+                        template = settings.announcementTemplate,
+                        speechRate = settings.ttsSpeechRate,
+                        speechPitch = settings.ttsPitch,
+                        repeatCount = settings.announcementRepeatCount
+                    )
+                }
             }
 
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
+                val app = context.applicationContext as? AutoResponderApp ?: AutoResponderApp.instance
+                app.callAnnouncer.stop()
                 if (isIncomingRinging) {
                     isCallAnswered = true
                     Log.d(tag, "Incoming call answered.")
@@ -59,6 +84,8 @@ class CallBroadcastReceiver : BroadcastReceiver() {
             }
 
             TelephonyManager.EXTRA_STATE_IDLE -> {
+                val app = context.applicationContext as? AutoResponderApp ?: AutoResponderApp.instance
+                app.callAnnouncer.stop()
                 val caller = savedIncomingNumber ?: incomingNumber ?: "Unknown Caller"
 
                 if (isIncomingRinging && !isCallAnswered) {

@@ -60,6 +60,7 @@ class MaxAssistantForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "MaxAssistantForegroundService onCreate()")
+        currentServiceInstance = this
         _isServiceRunning.value = true
 
         telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
@@ -452,6 +453,7 @@ class MaxAssistantForegroundService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "MaxAssistantForegroundService onDestroy()")
+        currentServiceInstance = null
         stopForegroundService()
     }
 
@@ -464,6 +466,9 @@ class MaxAssistantForegroundService : Service() {
 
         const val ACTION_START_SERVICE = "com.example.service.action.START_MAX"
         const val ACTION_STOP_SERVICE = "com.example.service.action.STOP_MAX"
+
+        var currentServiceInstance: MaxAssistantForegroundService? = null
+            private set
 
         private val _isServiceRunning = MutableStateFlow(false)
         val isServiceRunning: StateFlow<Boolean> = _isServiceRunning.asStateFlow()

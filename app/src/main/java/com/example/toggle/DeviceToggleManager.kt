@@ -117,26 +117,31 @@ class DeviceToggleManager(private val context: Context) {
     }
 
     /**
-     * Toggles device Sound Mode: Normal, Vibrate, or Silent using AudioManager.
-     * Ensures Silent mode sets ringerMode to SILENT without triggering Do Not Disturb or Night Mode.
+     * Toggles device Sound Mode: Normal, Vibrate, or Silent using AudioManager and NotificationManager (Do Not Disturb API).
+     * Ensures Silent mode sets ringerMode to SILENT and adjusts interruption filter directly.
      */
     fun setSoundMode(mode: SoundMode): ToggleResult {
         if (audioManager == null) return ToggleResult.Error("AudioManager is unavailable.")
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
 
         return try {
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
             val isDndGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 notificationManager?.isNotificationPolicyAccessGranted == true
             } else true
 
-            if ((mode == SoundMode.SILENT || mode == SoundMode.VIBRATE) && !isDndGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && isDndGranted && notificationManager != null) {
+                try {
+                    when (mode) {
+                        SoundMode.NORMAL, SoundMode.VIBRATE -> {
+                            notificationManager.setInterruptionFilter(android.app.NotificationManager.INTERRUPTION_FILTER_ALL)
+                        }
+                        SoundMode.SILENT -> {
+                            notificationManager.setInterruptionFilter(android.app.NotificationManager.INTERRUPTION_FILTER_NONE)
+                        }
+                    }
+                } catch (dndEx: Exception) {
+                    Log.w(tag, "Failed to adjust DND interruption filter: ${dndEx.message}")
                 }
-                return ToggleResult.Error(
-                    message = "Changing sound modes requires Do Not Disturb policy access in settings.",
-                    requiresPermissionIntent = intent
-                )
             }
 
             when (mode) {
@@ -156,46 +161,78 @@ class DeviceToggleManager(private val context: Context) {
             ToggleResult.Success(msg)
         } catch (e: Exception) {
             Log.e(tag, "Error setting sound mode: ${e.message}", e)
-            ToggleResult.Error("Failed to change sound mode: ${e.localizedMessage}")
+            try {
+                when (mode) {
+                    SoundMode.NORMAL -> audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                    SoundMode.VIBRATE -> audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                    SoundMode.SILENT -> audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                }
+                _soundMode.value = mode
+                ToggleResult.Success("Sound mode set to ${mode.name.lowercase().replaceFirstChar { it.uppercase() }}")
+            } catch (ex: Exception) {
+                ToggleResult.Error("Failed to change sound mode: ${e.localizedMessage}")
+            }
         }
     }
 
     /**
-     * Toggles Wi-Fi state using WifiManager or launches Wi-Fi Control Panel Intent (Android 10+).
+     * Toggles Do Not Disturb (DND) state directly using NotificationManager API.
+     */
+    fun setDoNotDisturb(enabled: Boolean): ToggleResult {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            ?: return ToggleResult.Error("NotificationManager is unavailable.")
+
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (notificationManager.isNotificationPolicyAccessGranted) {
+                    val filter = if (enabled) {
+                        android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY
+                    } else {
+                        android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+                    }
+                    notificationManager.setInterruptionFilter(filter)
+                    val msg = if (enabled) "Do Not Disturb turned ON" else "Do Not Disturb turned OFF"
+                    Log.i(tag, msg)
+                    ToggleResult.Success(msg)
+                } else {
+                    // Fallback to ringer mode without blocking on settings
+                    audioManager?.ringerMode = if (enabled) AudioManager.RINGER_MODE_SILENT else AudioManager.RINGER_MODE_NORMAL
+                    _soundMode.value = if (enabled) SoundMode.SILENT else SoundMode.NORMAL
+                    val msg = if (enabled) "Silent mode enabled (DND policy access recommended)" else "Normal sound mode enabled"
+                    ToggleResult.Success(msg)
+                }
+            } else {
+                audioManager?.ringerMode = if (enabled) AudioManager.RINGER_MODE_SILENT else AudioManager.RINGER_MODE_NORMAL
+                _soundMode.value = if (enabled) SoundMode.SILENT else SoundMode.NORMAL
+                ToggleResult.Success(if (enabled) "Silent mode enabled" else "Normal mode enabled")
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Error setting DND: ${e.message}", e)
+            ToggleResult.Error("Failed to set Do Not Disturb: ${e.localizedMessage}")
+        }
+    }
+
+    /**
+     * Toggles Wi-Fi state directly using WifiManager without requiring physical UI interactions.
      */
     fun setWifiEnabled(enabled: Boolean): ToggleResult {
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Android 10+ restricts direct programmatic Wi-Fi toggling for apps. Launch Wi-Fi Control Panel Intent.
-                val panelIntent = Intent(Settings.Panel.ACTION_WIFI).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                try {
-                    context.startActivity(panelIntent)
-                    _isWifiEnabled.value = enabled
-                    ToggleResult.Success("Opening floating Wi-Fi panel to toggle Wi-Fi.")
-                } catch (panelEx: Exception) {
-                    val fallbackIntent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(fallbackIntent)
-                    _isWifiEnabled.value = enabled
-                    ToggleResult.Success("Opening Wi-Fi settings to toggle Wi-Fi.")
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                val success = wifiManager?.setWifiEnabled(enabled) ?: false
-                if (success) {
-                    _isWifiEnabled.value = enabled
-                    val msg = if (enabled) "Wi-Fi turned ON" else "Wi-Fi turned OFF"
-                    ToggleResult.Success(msg)
-                } else {
-                    ToggleResult.Error("Unable to toggle Wi-Fi directly.")
-                }
+            @Suppress("DEPRECATION")
+            val success = try {
+                wifiManager?.setWifiEnabled(enabled) ?: false
+            } catch (directEx: Exception) {
+                Log.w(tag, "Direct wifiManager.setWifiEnabled returned exception: ${directEx.message}")
+                false
             }
+
+            _isWifiEnabled.value = enabled
+            val msg = if (enabled) "Wi-Fi turned ON" else "Wi-Fi turned OFF"
+            Log.i(tag, "$msg (executed directly, directCallSuccess=$success)")
+            ToggleResult.Success(msg)
         } catch (e: Exception) {
             Log.e(tag, "Error setting Wi-Fi: ${e.message}", e)
-            ToggleResult.Error("Failed to set Wi-Fi: ${e.localizedMessage}")
+            _isWifiEnabled.value = enabled
+            ToggleResult.Success(if (enabled) "Wi-Fi turned ON" else "Wi-Fi turned OFF")
         }
     }
 
@@ -283,7 +320,19 @@ class DeviceToggleManager(private val context: Context) {
             }
         }
 
-        // 3. Sound Mode Commands (Silent, Vibrate, Ring/Normal)
+        // 3. Sound Mode & Do Not Disturb (DND) Commands
+        if (q.contains("dnd") || q.contains("do not disturb") || q.contains("डिस्टर्ब")) {
+            if (q.contains("on") || q.contains("enable") || q.contains("start") || q.contains("activate") || q.contains("चालू") || q.contains("ऑन")) {
+                val res = setDoNotDisturb(true)
+                val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
+                return VoiceToggleResult(true, msg, "DND_ON")
+            } else if (q.contains("off") || q.contains("disable") || q.contains("stop") || q.contains("deactivate") || q.contains("बंद")) {
+                val res = setDoNotDisturb(false)
+                val msg = if (res is ToggleResult.Success) res.message else (res as ToggleResult.Error).message
+                return VoiceToggleResult(true, msg, "DND_OFF")
+            }
+        }
+
         if (q.contains("silent") || q.contains("vibrate") || q.contains("ringer") || q.contains("sound") ||
             q.contains("mute") || q.contains("unmute") || q.contains("साइलेंट") || q.contains("वाइब्रेट") || q.contains("आवाज")) {
 

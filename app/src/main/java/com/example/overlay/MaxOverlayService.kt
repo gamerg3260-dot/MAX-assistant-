@@ -325,14 +325,46 @@ class MaxOverlayService : Service() {
                 val appInstance = com.example.AutoResponderApp.instance
                 val swaraTts = appInstance.swaraTtsService
 
-                // 1. App Launch commands
+                // 1. Direct Calling Intent (Immediate ACTION_CALL, No UI/Confirmation Delay)
+                val directCallRes = appInstance.directCallManager.processVoiceCallCommand(spokenQuery)
+                if (directCallRes.isHandled) {
+                    val feedback = directCallRes.feedbackMessage
+                    _isProcessing.value = false
+                    _overlayStatus.value = "Direct Calling"
+                    _overlayResponse.value = feedback
+
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery, "DIRECT_CALL")
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
+
+                    swaraTts.speak(feedback)
+                    openWakeWord.resumeListening()
+                    return@launch
+                }
+
+                // 2. App Launch commands
                 val appLaunchRes = appInstance.appLauncherManager.processVoiceAppLaunchCommand(spokenQuery)
                 if (appLaunchRes.isHandled) {
                     val feedback = appLaunchRes.feedbackMessage
                     _isProcessing.value = false
                     _overlayStatus.value = "App Launcher"
                     _overlayResponse.value = feedback
-                    swaraTts.speak(feedback)
+
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery, "APP_LAUNCH")
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
+
+                    val intentToLaunch = appLaunchRes.launchIntent
+                    if (intentToLaunch != null) {
+                        swaraTts.speak(feedback, onDone = {
+                            appInstance.appLauncherManager.launchIntentNow(intentToLaunch)
+                        })
+                        // Backup timer to guarantee launch if TTS onDone callback is skipped
+                        serviceScope.launch {
+                            kotlinx.coroutines.delay(1200)
+                            appInstance.appLauncherManager.launchIntentNow(intentToLaunch)
+                        }
+                    } else {
+                        swaraTts.speak(feedback)
+                    }
                     openWakeWord.resumeListening()
                     return@launch
                 }
@@ -344,6 +376,10 @@ class MaxOverlayService : Service() {
                     _isProcessing.value = false
                     _overlayStatus.value = "Hardware Control"
                     _overlayResponse.value = feedback
+
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery, "HARDWARE_TOGGLE")
+                    com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", feedback)
+
                     swaraTts.speak(feedback)
                     openWakeWord.resumeListening()
                     return@launch
@@ -365,7 +401,10 @@ class MaxOverlayService : Service() {
                         isFirst = false
                     }
 
-                    if (fullReply.isBlank()) {
+                    if (fullReply.isNotBlank()) {
+                        com.example.ai.ConversationContextManager.getInstance().addTurn("user", spokenQuery)
+                        com.example.ai.ConversationContextManager.getInstance().addTurn("assistant", fullReply)
+                    } else {
                         val fallback = "Sorry, I could not complete the request right now."
                         _overlayResponse.value = fallback
                         swaraTts.speak(fallback)

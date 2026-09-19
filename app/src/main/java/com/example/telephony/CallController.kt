@@ -145,4 +145,33 @@ class CallController(private val context: Context) {
             CallActionResult.Failure("Failed to silence ringer: ${e.message}")
         }
     }
+
+    /**
+     * Directly initiates an outgoing phone call using Intent.ACTION_CALL with a 'tel:' URI,
+     * immediately starting the call without opening the dialer UI.
+     */
+    fun makeDirectCall(phoneNumber: String): CallActionResult {
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CALL_PHONE
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.e(tag, "CALL_PHONE permission not granted.")
+            return CallActionResult.Failure("CALL_PHONE permission not granted.")
+        }
+
+        return try {
+            val cleanNumber = phoneNumber.trim()
+            val callIntent = android.content.Intent(android.content.Intent.ACTION_CALL).apply {
+                data = android.net.Uri.parse("tel:${android.net.Uri.encode(cleanNumber)}")
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(callIntent)
+            Log.i(tag, "Direct call initiated via Intent.ACTION_CALL to $cleanNumber")
+            CallActionResult.Success("Calling $cleanNumber directly...")
+        } catch (e: Exception) {
+            Log.e(tag, "Exception initiating direct call to $phoneNumber: ${e.message}", e)
+            CallActionResult.Failure("Failed to initiate call: ${e.localizedMessage}")
+        }
+    }
 }

@@ -59,12 +59,65 @@ object ContactResolver {
         }
     }
 
-    private fun formatPhoneNumberForSpeech(number: String): String {
-        // If it looks like a phone number, format digits with spaces so TTS spells out natural digit groups
+    /**
+     * Resolves a spoken contact name or partial name to a matching phone contact and number.
+     * Returns Pair(ResolvedDisplayName, PhoneNumber) or null if no matching contact found.
+     */
+    fun findPhoneNumberByName(context: Context, query: String): Pair<String, String>? {
+        val cleanQuery = query.trim()
+        if (cleanQuery.isBlank()) return null
+
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CONTACTS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "READ_CONTACTS permission not granted. Cannot search contacts.")
+            return null
+        }
+
+        return try {
+            val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+            val projection = arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER
+            )
+            val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
+            val selectionArgs = arrayOf("%$cleanQuery%")
+
+            context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                    val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                    if (nameIndex != -1 && numberIndex != -1) {
+                        val name = cursor.getString(nameIndex)
+                        val number = cursor.getString(numberIndex)
+                        if (!number.isNullOrBlank()) {
+                            return Pair(name ?: cleanQuery, number)
+                        }
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error searching contact by name '$cleanQuery': ${e.message}", e)
+            null
+        }
+    }
+
+    /**
+     * Formats phone numbers so Android Text-To-Speech spells out individual digits or cadence groups
+     * rather than misreading phone numbers as billions or integers.
+     */
+    fun formatPhoneNumberForSpeech(number: String): String {
         val digitsOnly = number.filter { it.isDigit() }
         return if (digitsOnly.length >= 7) {
-            // Group digits for clear speech cadence: e.g. "5 5 5, 0 1 9 9"
-            number
+            // Group digits into chunks of 3 or 4 separated by commas for natural TTS cadence
+            digitsOnly.chunked(3).joinToString(", ") { chunk ->
+                chunk.toCharArray().joinToString(" ")
+            }
+        } else if (digitsOnly.isNotEmpty()) {
+            digitsOnly.toCharArray().joinToString(" ")
         } else if (number.isNotBlank()) {
             number
         } else {
